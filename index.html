@@ -1,75 +1,235 @@
-<!doctype html>
-<html>
-    <head>
-        <meta charset="utf-8" />
-        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-        <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-        <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
-    </head>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AR Land Boundary Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+<script src="https://cdn.rawgit.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
+<style>
+  #calibrate-btn {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 999;
+    background: #fff;
+    border: 1px solid #333;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #compass {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 20px;
+    color: white;
+    z-index: 999;
+    font-family: sans-serif;
+    background: rgba(0,0,0,0.3);
+    padding: 5px 10px;
+    border-radius: 5px;
+  }
+</style>
+</head>
+<body style="margin:0;overflow:hidden;">
+<button id="calibrate-btn">Calibrate Here</button>
+<div id="compass">North: 0°</div>
+<a-scene embedded arjs="sourceType: webcam; gpsMinAccuracy: 20;" vr-mode-ui="enabled: false">
+  <a-entity id="land-boundary"></a-entity>
+  <a-entity id="land-polygon"></a-entity>
+  <a-entity id="user-marker"></a-entity>
+  <a-camera id="camera" gps-camera rotation-reader></a-camera>
+</a-scene>
 
-    <body style="margin: 0; overflow: hidden;">
-        <a-scene
-            embedded
-            loading-screen="enabled: false;"
-            arjs="sourceType: webcam; debugUIEnabled: false;"
-        >
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36275270109053; longitude: -71.06799299683564;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36293636564523; longitude: -71.0679651679721;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36464470163011; longitude: -71.0679992363567;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36464382495869; longitude: -71.06574886446494;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.364095005353214; longitude: -71.06574970802724;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36409469181381; longitude: -71.06497117171959;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36354587220936; longitude: -71.06497202328269;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36354618574768; longitude: -71.06575055158952;"
-                ></a-image>
-                <a-image
-                    src="assets/asset.jpeg"
-                    look-at="[gps-camera]"
-                    scale="1 1 1"
-                    gps-entity-place="latitude: 45.36275185642023; longitude: -71.06575805095848;"
-                ></a-image>
+<script>
+const corners = [
+  {lat: 45.36275270109053, lon: -71.06799299683564},
+  {lat: 45.36293636564523, lon: -71.0679651679721},
+  {lat: 45.36464470163011, lon: -71.0679992363567},
+  {lat: 45.36464382495869, lon: -71.06574886446494},
+  {lat: 45.364095005353214, lon: -71.06574970802724},
+  {lat: 45.36409469181381, lon: -71.06497117171959},
+  {lat: 45.36354587220936, lon: -71.06497202328269},
+  {lat: 45.36354618574768, lon: -71.06575055158952},
+  {lat: 45.36275185642023, lon: -71.06575805095848}
+];
 
-            <a-camera gps-camera rotation-reader></a-camera>
-        </a-scene>
-    </body>
+const landEl = document.getElementById('land-boundary');
+const polygonEl = document.getElementById('land-polygon');
+const cameraEl = document.getElementById('camera');
+const compassEl = document.getElementById('compass');
+const userEl = document.getElementById('user-marker');
+
+let calibration = {lat: 0, lon: 0, calibrated: false};
+document.getElementById('calibrate-btn').addEventListener('click',()=>{
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      calibration.lat=pos.coords.latitude;
+      calibration.lon=pos.coords.longitude;
+      calibration.calibrated=true;
+      alert('Calibration point set!');
+    });
+  }
+});
+
+// Lat/Lon to meters
+function latLonToMeters(lat, lon){
+  const first=corners[0];
+  const dx=geolib.getDistance({latitude:first.lat,longitude:first.lon},{latitude:first.lat,longitude:lon});
+  const dy=geolib.getDistance({latitude:first.lat,longitude:first.lon},{latitude:lat,longitude:first.lon});
+  return {x: lon>first.lon?dx:-dx, z: lat>first.lat?-dy:dy, y:0};
+}
+
+// Distance
+function distance(c1,c2){
+  return geolib.getDistance({latitude:c1.lat,longitude:c1.lon},{latitude:c2.lat,longitude:c2.lon});
+}
+
+// Angle at corner
+function angleAtCorner(prev,current,next){
+  const v1=[prev.lat-current.lat,prev.lon-current.lon];
+  const v2=[next.lat-current.lat,next.lon-current.lon];
+  const dot=v1[0]*v2[0]+v1[1]*v2[1];
+  const mag1=Math.sqrt(v1[0]**2+v1[1]**2);
+  const mag2=Math.sqrt(v2[0]**2+v2[1]**2);
+  return Math.acos(dot/(mag1*mag2))*(180/Math.PI);
+}
+
+// Cardinal color
+function cardinalColor(c1,c2){
+  const bearing=geolib.getRhumbLineBearing({latitude:c1.lat,longitude:c1.lon},{latitude:c2.lat,longitude:c2.lon});
+  if(bearing>=315||bearing<45) return 'red';
+  if(bearing>=45&&bearing<135) return 'green';
+  if(bearing>=135&&bearing<225) return 'blue';
+  return 'yellow';
+}
+
+// Line thickness
+function scaleLineByDistance(obj){
+  const camPos=cameraEl.object3D.position;
+  const objPos=obj.object3D.position;
+  const dist=camPos.distanceTo(objPos);
+  obj.setAttribute('line','lineWidth',Math.min(Math.max(0.5/(dist/5),0.05),0.5));
+}
+
+// AR markers
+const cornerSpheres=[];
+const cornerTexts=[];
+corners.forEach((corner,i)=>{
+  const pos=latLonToMeters(corner.lat,corner.lon);
+  const sphere=document.createElement('a-sphere');
+  sphere.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
+  sphere.setAttribute('radius',0.5);
+  sphere.setAttribute('color','yellow');
+  sphere.setAttribute('opacity',0.8);
+  sphere.setAttribute('class','interactive');
+  landEl.appendChild(sphere);
+  cornerSpheres.push(sphere);
+
+  const prev=corners[(i-1+corners.length)%corners.length];
+  const next=corners[(i+1)%corners.length];
+  const ang=angleAtCorner(prev,corner,next).toFixed(1);
+
+  const text=document.createElement('a-text');
+  text.setAttribute('value',ang+'°');
+  text.setAttribute('position',`${pos.x} 1.2 ${pos.z}`);
+  text.setAttribute('align','center');
+  text.setAttribute('color','white');
+  text.setAttribute('side','double');
+  text.setAttribute('look-at','#camera');
+  landEl.appendChild(text);
+  cornerTexts.push(text);
+
+  // Tap interaction
+  sphere.addEventListener('click',()=>{alert(`Corner ${i+1}\nLat: ${corner.lat}\nLon: ${corner.lon}`);});
+});
+
+// Draw lines
+const edgeLines=[];
+const edgeTexts=[];
+for(let i=0;i<corners.length;i++){
+  const c1=latLonToMeters(corners[i].lat,corners[i].lon);
+  const c2=latLonToMeters(corners[(i+1)%corners.length].lat,corners[(i+1)%corners.length].lon);
+  const color=cardinalColor(corners[i],corners[(i+1)%corners.length]);
+  const line=document.createElement('a-entity');
+  line.setAttribute('line',`start:${c1.x} ${c1.y} ${c1.z}; end:${c2.x} ${c2.y} ${c2.z}; color:${color}; lineWidth:0.1`);
+  line.setAttribute('class','interactive');
+  landEl.appendChild(line);
+  edgeLines.push(line);
+
+  const midX=(c1.x+c2.x)/2;
+  const midZ=(c1.z+c2.z)/2;
+  const dist=distance(corners[i],corners[(i+1)%corners.length]);
+  const text=document.createElement('a-text');
+  text.setAttribute('value',dist+'m');
+  text.setAttribute('position',`${midX} 1 ${midZ}`);
+  text.setAttribute('align','center');
+  text.setAttribute('color','white');
+  text.setAttribute('side','double');
+  text.setAttribute('look-at','#camera');
+  landEl.appendChild(text);
+  edgeTexts.push(text);
+
+  line.addEventListener('componentinitialized',()=>{setInterval(()=>scaleLineByDistance(line),100);});
+  line.addEventListener('click',()=>{alert(`Edge ${i+1}\nDistance: ${dist} meters`);});
+}
+
+// Polygon overlay
+const polygonPositions=corners.map(c=>latLonToMeters(c.lat,c.lon));
+const vertices=polygonPositions.map(p=>new THREE.Vector3(p.x,0.1,p.z));
+vertices.push(vertices[0].clone());
+const shape=new THREE.Shape(vertices.map(v=>new THREE.Vector2(v.x,v.z)));
+const geometry=new THREE.ShapeGeometry(shape);
+const material=new THREE.MeshBasicMaterial({color:0x00ff00,opacity:0.3,transparent:true,side:THREE.DoubleSide});
+const mesh=new THREE.Mesh(geometry,material);
+polygonEl.setObject3D('mesh',mesh);
+
+// Compass
+if(window.DeviceOrientationEvent){
+  window.addEventListener('deviceorientationabsolute',event=>{
+    let alpha=event.alpha;
+    if(alpha===null)return;
+    alpha=Math.round(alpha);
+    compassEl.innerText='North: '+alpha+'°';
+  },true);
+}
+
+// Create user marker
+const userSphere=document.createElement('a-sphere');
+userSphere.setAttribute('radius',0.5);
+userSphere.setAttribute('color','red');
+userSphere.setAttribute('opacity',0.9);
+userEl.appendChild(userSphere);
+
+// Real-time dynamic updates
+setInterval(()=>{
+  if(!cameraEl.components['gps-camera'] || !cameraEl.components['gps-camera'].gpsOrigin) return;
+  const camLat=cameraEl.components['gps-camera'].gpsOrigin.latitude;
+  const camLon=cameraEl.components['gps-camera'].gpsOrigin.longitude;
+  const camPos={lat:camLat, lon:camLon};
+
+  // Update corner distances
+  cornerTexts.forEach((text,i)=>{
+    const dist=distance(camPos,corners[i]);
+    text.setAttribute('value',`Dist: ${dist} m`);
+  });
+
+  // Update edge distances
+  edgeTexts.forEach((text,i)=>{
+    const p1=corners[i];
+    const p2=corners[(i+1)%corners.length];
+    const distToLine=geolib.getDistanceFromLine(camPos,p1,p2);
+    text.setAttribute('value',`Dist to edge: ${distToLine} m`);
+  });
+
+  // Update user marker position
+  const userPos=latLonToMeters(camLat,camLon);
+  userSphere.setAttribute('position',`${userPos.x} 0.1 ${userPos.z}`);
+
+},500);
+
+</script>
+</body>
 </html>

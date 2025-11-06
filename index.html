@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>AR Land Boundary — Walkable Line (Style C)</title>
+<title>AR Land Boundary — Poles + Polygon (Style C)</title>
 
-<!-- A-Frame 1.2.0 -->
+<!-- A-Frame (compatible version) -->
 <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
 
-<!-- AR.js 3.3.2 -->
+<!-- AR.js (compatible GPS build) -->
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.2/aframe/build/aframe-ar.js"></script>
 
-<!-- Turf.js -->
+<!-- Turf (stable browser global) -->
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
 
 <style>
@@ -34,158 +34,297 @@
 </style>
 </head>
 <body>
-
 <button id="calibrate-btn">Calibrate Here</button>
 <div id="compass">North: --°</div>
 <div id="status">Waiting for GPS & Camera...</div>
 
+<!-- A-Frame scene with AR.js -->
 <a-scene embedded arjs="sourceType: webcam; gpsMinAccuracy: 20;" vr-mode-ui="enabled: false">
   <a-entity id="land-boundary"></a-entity>
   <a-entity id="land-polygon"></a-entity>
-  <a-entity id="boundary"></a-entity>
   <a-entity id="user-marker"></a-entity>
   <a-camera id="camera" gps-camera rotation-reader></a-camera>
 </a-scene>
 
 <script>
-// ---------- USER COORDINATES ----------
+/* ----------------------
+   Editable: your corner coordinates (decimal degrees)
+   Keep them ordered around the polygon (CW or CCW).
+   ---------------------- */
 const corners = [
-  [45.3627519,-71.0657581],  
-[45.3635462,-71.0657506],  
-[45.3635459,-71.064972],  
-[45.3640947,-71.0649712],  
-[45.364095,-71.0657497],  
-[45.3646438,-71.0657489], 
-[45.3646447,-71.0679992],  
-[45.3629364,-71.0679652],  
-[45.3627527,-71.067993]
+  {lat: 45.36275270109053, lon: -71.06799299683564},
+  {lat: 45.36293636564523, lon: -71.0679651679721},
+  {lat: 45.36464470163011, lon: -71.0679992363567},
+  {lat: 45.36464382495869, lon: -71.06574886446494},
+  {lat: 45.364095005353214, lon: -71.06574970802724},
+  {lat: 45.36409469181381, lon: -71.06497117171959},
+  {lat: 45.36354587220936, lon: -71.06497202328269},
+  {lat: 45.36354618574768, lon: -71.06575055158952},
+  {lat: 45.36275185642023, lon: -71.06575805095848}
 ];
 
-// ---------- Scene elements ----------
+/* ----- scene elements ----- */
 const landEl = document.getElementById('land-boundary');
 const polygonEl = document.getElementById('land-polygon');
-const boundaryEl = document.getElementById('boundary');
 const userEl = document.getElementById('user-marker');
 const cameraEl = document.getElementById('camera');
 const compassEl = document.getElementById('compass');
 const statusEl = document.getElementById('status');
 const calibrateBtn = document.getElementById('calibrate-btn');
 
-// ---------- Smoothing ----------
-let alpha = 0.2;
-let smoothLat = null;
-let smoothLon = null;
+/* ----- calibration storage ----- */
+let calibration = { lat: null, lon: null, applied: false };
 
-// ---------- Helper: lat/lon -> local meters ----------
-const origin = { lat: corners[0][0], lon: corners[0][1] };
-function latLonToMeters(lat, lon) {
-  const R = 6378137;
-  const dLat = THREE.MathUtils.degToRad(lat - origin.lat);
-  const dLon = THREE.MathUtils.degToRad(lon - origin.lon);
-  const x = dLon * R * Math.cos(THREE.MathUtils.degToRad(origin.lat));
-  const z = dLat * R;
-  return { x, y:0, z };
+/* ---------- helpers ---------- */
+
+// Convert lat/lon -> local meters relative to first corner using Turf
+function latLonToLocalMeters(lat, lon) {
+  const origin = corners[0];
+  const from = turf.point([origin.lon, origin.lat]);
+  const to = turf.point([lon, lat]);
+  const dist = turf.distance(from, to, { units: 'meters' }); // meters
+  const brng = turf.bearing(from, to); // degrees from north clockwise
+  const rad = brng * Math.PI / 180;
+  const x = dist * Math.sin(rad);   // east offset
+  const z = -dist * Math.cos(rad);  // north -> negative z
+  return { x, y: 0, z };
 }
 
-// ---------- Draw corner poles ----------
-const localPositions = corners.map(c => latLonToMeters(c[0], c[1]));
+// Precompute local positions
+const localPositions = corners.map(c => latLonToLocalMeters(c.lat, c.lon));
 
-localPositions.forEach((pos,i)=>{
+// Angle at index (degrees)
+function angleAtIndex(i) {
+  const prev = localPositions[(i - 1 + localPositions.length) % localPositions.length];
+  const cur = localPositions[i];
+  const next = localPositions[(i + 1) % localPositions.length];
+  const v1 = { x: prev.x - cur.x, z: prev.z - cur.z };
+  const v2 = { x: next.x - cur.x, z: next.z - cur.z };
+  const dot = v1.x * v2.x + v1.z * v2.z;
+  const m1 = Math.hypot(v1.x, v1.z);
+  const m2 = Math.hypot(v2.x, v2.z);
+  if (m1 === 0 || m2 === 0) return 0;
+  let cos = dot / (m1 * m2);
+  cos = Math.min(1, Math.max(-1, cos));
+  return (Math.acos(cos) * 180 / Math.PI).toFixed(1);
+}
+
+// Create small component to make an entity face the camera
+AFRAME.registerComponent('face-camera', {
+  tick: function () {
+    const cam = document.querySelector('#camera');
+    if (!cam) return;
+    const camPos = cam.object3D.position;
+    const obj = this.el.object3D;
+    obj.lookAt(camPos.x, camPos.y, camPos.z);
+  }
+});
+
+/* ---------- draw corner poles (green) with height labels ---------- */
+const cornerLabels = [];
+localPositions.forEach((pos, i) => {
+  // pole
   const pole = document.createElement('a-cylinder');
-  pole.setAttribute('position',`${pos.x} 0 ${pos.z}`);
-  pole.setAttribute('height','2.0');
-  pole.setAttribute('radius','0.09');
-  pole.setAttribute('color','#1a9a3a'); // green
+  pole.setAttribute('position', `${pos.x} 0 ${pos.z}`);
+  pole.setAttribute('height', '2.0');
+  pole.setAttribute('radius', '0.09');
+  pole.setAttribute('color', '#1a9a3a'); // green pole
+  pole.setAttribute('opacity', '0.96');
   landEl.appendChild(pole);
 
+  // top cap / knob
   const cap = document.createElement('a-sphere');
-  cap.setAttribute('position',`${pos.x} 1.05 ${pos.z}`);
-  cap.setAttribute('radius','0.16');
-  cap.setAttribute('color','#00cc66');
+  cap.setAttribute('position', `${pos.x} 1.05 ${pos.z}`);
+  cap.setAttribute('radius', '0.16');
+  cap.setAttribute('color', '#00cc66');
+  cap.setAttribute('opacity', '1');
+  cap.classList.add('interactive');
   landEl.appendChild(cap);
 
-  const label = document.createElement('a-text');
-  label.setAttribute('value',`H: 2.0 m`);
-  label.setAttribute('position',`${pos.x} 2.2 ${pos.z}`);
-  label.setAttribute('align','center');
-  label.setAttribute('color','#fff');
-  label.setAttribute('side','double');
-  landEl.appendChild(label);
+  // height label (shows height text)
+  const heightText = document.createElement('a-text');
+  heightText.setAttribute('value', `H: 2.0 m`);
+  heightText.setAttribute('position', `${pos.x} 2.2 ${pos.z}`);
+  heightText.setAttribute('align', 'center');
+  heightText.setAttribute('color', '#ffffff');
+  heightText.setAttribute('side', 'double');
+  heightText.setAttribute('face-camera', '');
+  landEl.appendChild(heightText);
+  cornerLabels.push(heightText);
+
+  // click -> show lat/lon
+  cap.addEventListener('click', () => {
+    alert(`Corner ${i+1}\nLat: ${corners[i].lat}\nLon: ${corners[i].lon}`);
+  });
+
+  // angle label below top
+  const ang = angleAtIndex(i);
+  const angText = document.createElement('a-text');
+  angText.setAttribute('value', `${ang}°`);
+  angText.setAttribute('position', `${pos.x} 1.6 ${pos.z}`);
+  angText.setAttribute('align', 'center');
+  angText.setAttribute('color', '#fff');
+  angText.setAttribute('side', 'double');
+  angText.setAttribute('face-camera', '');
+  landEl.appendChild(angText);
 });
 
-// ---------- Draw ground polygon ----------
-(function buildPolygon(){
+/* ---------- draw edges (colored by cardinal bearing) + distance labels ---------- */
+const edgeLabels = [];
+for (let i = 0; i < localPositions.length; i++) {
+  const a = localPositions[i];
+  const b = localPositions[(i + 1) % localPositions.length];
+
+  // determine color by bearing (from corners array using turf)
+  const bdeg = ((turf.bearing(turf.point([corners[i].lon, corners[i].lat]), turf.point([corners[(i+1)%corners.length].lon, corners[(i+1)%corners.length].lat])) + 360) % 360);
+  let color = '#ffff00';
+  if (bdeg >= 315 || bdeg < 45) color = '#ff0000';       // north red
+  else if (bdeg >= 45 && bdeg < 135) color = '#00ff00';  // east green
+  else if (bdeg >= 135 && bdeg < 225) color = '#0000ff'; // south blue
+  else color = '#ffff00';                                // west yellow
+
+  // line
+  const line = document.createElement('a-entity');
+  line.setAttribute('line', `start:${a.x} 0 ${a.z}; end:${b.x} 0 ${b.z}; color:${color}; linewidth: 4`);
+  line.classList.add('interactive');
+  landEl.appendChild(line);
+
+  // distance label (geodesic)
+  const from = turf.point([corners[i].lon, corners[i].lat]);
+  const to = turf.point([corners[(i+1)%corners.length].lon, corners[(i+1)%corners.length].lat]);
+  const d = turf.distance(from, to, { units: 'meters' });
+  const midX = (a.x + b.x) / 2;
+  const midZ = (a.z + b.z) / 2;
+
+  const label = document.createElement('a-text');
+  label.setAttribute('value', `${Math.round(d)} m`);
+  label.setAttribute('position', `${midX} 0.75 ${midZ}`);
+  label.setAttribute('align', 'center');
+  label.setAttribute('color', '#ffffff');
+  label.setAttribute('side', 'double');
+  label.setAttribute('face-camera', '');
+  landEl.appendChild(label);
+  edgeLabels.push(label);
+
+  // tap to show precise distance
+  ((idx, meters) => {
+    line.addEventListener('click', () => {
+      alert(`Edge ${idx+1}\nDistance: ${Math.round(meters)} m`);
+    });
+  })(i, d);
+}
+
+/* ---------- build semi-transparent polygon mesh ---------- */
+(function buildPoly(){
   const A3 = AFRAME.THREE;
-  if(localPositions.length<3) return;
-  const pts = localPositions.map(p=>new A3.Vector2(p.x,p.z));
+  if (localPositions.length < 3) return;
+  const pts = localPositions.map(p => new A3.Vector2(p.x, p.z));
   const shape = new A3.Shape(pts);
   const geom = new A3.ShapeGeometry(shape);
-  const mat = new A3.MeshBasicMaterial({color:0x00cc66,opacity:0.28,transparent:true,side:A3.DoubleSide,depthWrite:false});
-  const mesh = new A3.Mesh(geom,mat);
-  mesh.position.set(0,0.01,0);
-  polygonEl.setObject3D('mesh',mesh);
+  const mat = new A3.MeshBasicMaterial({
+    color: 0x00cc66,
+    opacity: 0.28,
+    transparent: true,
+    side: A3.DoubleSide,
+    depthWrite: false
+  });
+  const mesh = new A3.Mesh(geom, mat);
+  mesh.position.set(0, 0.01, 0);
+  polygonEl.setObject3D('mesh', mesh);
 })();
 
-// ---------- Draw boundary walkable line ----------
-(function drawBoundary(){
-  const pts = [...localPositions, localPositions[0]]; // close loop
-  for(let i=0;i<pts.length-1;i++){
-    const seg = document.createElement('a-entity');
-    seg.setAttribute('line',`start:${pts[i].x} 0 ${pts[i].z}; end:${pts[i+1].x} 0 ${pts[i+1].z}; width:3`);
-    seg.setAttribute('material',{color:'#00ff00'});
-    boundaryEl.appendChild(seg);
-  }
-})();
-
-// ---------- User "You are here" marker ----------
+/* ---------- user "You are here" marker (smoothed) ---------- */
 const userSphere = document.createElement('a-sphere');
-userSphere.setAttribute('radius','0.22');
-userSphere.setAttribute('color','#ff3333');
-userSphere.setAttribute('opacity','0.95');
-userSphere.setAttribute('position','0 0.12 0');
+userSphere.setAttribute('radius', '0.22');
+userSphere.setAttribute('color', '#ff3333');
+userSphere.setAttribute('opacity', '0.95');
+userSphere.setAttribute('position', '0 0.12 0');
 userEl.appendChild(userSphere);
 
-// ---------- Compass ----------
-function handleOrientation(e){
-  let alpha = e.alpha;
-  if(alpha===null || alpha===undefined) return;
-  compassEl.innerText=`North: ${Math.round(alpha)}°`;
-}
-window.addEventListener('deviceorientationabsolute', handleOrientation,true);
-window.addEventListener('deviceorientation', handleOrientation,true);
-
-// ---------- Calibration button ----------
-calibrateBtn.addEventListener('click',()=>{
-  if(!navigator.geolocation){ alert('Geolocation not available.'); return; }
-  navigator.geolocation.getCurrentPosition(pos=>{
-    origin.lat = pos.coords.latitude;
-    origin.lon = pos.coords.longitude;
+/* ---------- calibration button ---------- */
+calibrateBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    alert('Geolocation not available.');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(pos => {
+    calibration.lat = pos.coords.latitude;
+    calibration.lon = pos.coords.longitude;
+    calibration.applied = true;
     alert('Calibration saved at current position.');
-  },err=>{ alert('Could not read location: '+err.message); }, {enableHighAccuracy:true,maximumAge:5000});
+  }, err => {
+    alert('Could not read location for calibration: ' + err.message);
+  }, { enableHighAccuracy: true, maximumAge: 5000 });
 });
 
-// ---------- GPS watch + smoothing ----------
-if(navigator.geolocation){
-  navigator.geolocation.watchPosition(pos=>{
-    let lat = pos.coords.latitude;
-    let lon = pos.coords.longitude;
+/* ---------- compass (device orientation) ---------- */
+function handleOrientation(e) {
+  let alpha = e.alpha;
+  if (alpha === null || alpha === undefined) return;
+  const heading = Math.round(alpha);
+  compassEl.innerText = `North: ${heading}°`;
+}
+window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+window.addEventListener('deviceorientation', handleOrientation, true);
 
-    if(smoothLat===null){ smoothLat=lat; smoothLon=lon; }
-    smoothLat = alpha*lat + (1-alpha)*smoothLat;
-    smoothLon = alpha*lon + (1-alpha)*smoothLon;
+/* ---------- live updates: watchPosition for smoother updates ---------- */
+let smoothing = { x: 0, z: 0, initialized: false };
 
-    const p = latLonToMeters(smoothLat,smoothLon);
-    userSphere.setAttribute('position',`${p.x} 0.12 ${p.z}`);
+if (navigator.geolocation) {
+  const watcher = navigator.geolocation.watchPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy ? Math.round(pos.coords.accuracy) + ' m' : 'unknown';
+    statusEl.innerText = `GPS accuracy: ${acc}`;
 
-    statusEl.innerText=`GPS accuracy: ${Math.round(pos.coords.accuracy)} m`;
-  },err=>{ statusEl.innerText='GPS error: '+err.message; },
-  {enableHighAccuracy:true, maximumAge:1000, timeout:5000});
+    // compute local coordinates relative to first corner
+    const lp = latLonToLocalMeters(lat, lon);
+
+    // smoothing (simple EMA)
+    if (!smoothing.initialized) {
+      smoothing.x = lp.x; smoothing.z = lp.z; smoothing.initialized = true;
+    } else {
+      smoothing.x = smoothing.x * 0.72 + lp.x * 0.28;
+      smoothing.z = smoothing.z * 0.72 + lp.z * 0.28;
+    }
+
+    // update user marker
+    userSphere.setAttribute('position', `${smoothing.x} 0.12 ${smoothing.z}`);
+
+    // update corner distance labels (display dist to each corner)
+    for (let i = 0; i < corners.length; i++) {
+      const c = corners[i];
+      const dist = turf.distance(turf.point([lon, lat]), turf.point([c.lon, c.lat]), { units: 'meters' });
+      // update the angle label is used earlier for height; here we set cornerLabels text to show dist
+      // cornerLabels hold height labels; instead we will update the angle text (which we didn't store). 
+      // For simplicity update cornerLabels to show distance (height labels remain static)
+      // (Alternatively, you could store separate label references for distance.)
+      // So we'll append a small dynamic label above the height label:
+      // but to keep it simple: update cornerLabels[i] to show distance
+      cornerLabels[i].setAttribute('value', `Dist: ${Math.round(dist)} m`);
+    }
+
+    // update edge labels (distance from user to nearest point on edge)
+    edgeLabels.forEach((lbl, i) => {
+      const line = turf.lineString([[corners[i].lon, corners[i].lat], [corners[(i+1)%corners.length].lon, corners[(i+1)%corners.length].lat]]);
+      const userPt = turf.point([lon, lat]);
+      const nearest = turf.nearestPointOnLine(line, userPt, { units: 'meters' });
+      const d = turf.distance(userPt, nearest, { units: 'meters' });
+      lbl.setAttribute('value', `To edge: ${Math.round(d)} m`);
+    });
+
+  }, err => {
+    statusEl.innerText = 'GPS error: ' + err.message;
+  }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 });
 } else {
-  statusEl.innerText='Geolocation unsupported.';
+  statusEl.innerText = 'Geolocation unsupported.';
 }
 
-setTimeout(()=>{statusEl.innerText='Point camera, allow Camera & Location, then walk your land.';},1200);
-</script>
+/* small ready message */
+setTimeout(() => {
+  statusEl.innerText = 'Point camera, allow Camera & Location, then walk your land.';
+}, 1200);
 
+</script>
 </body>
 </html>

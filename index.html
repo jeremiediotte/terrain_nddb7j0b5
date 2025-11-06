@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.4/aframe/build/aframe-ar.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/dist/geolib.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/dist/geolib.min.js"></script>
 
 </head>
 <body>
   <script>
-    console.log("Geolib loaded?", typeof geolib !== "undefined");
+    console.log("geolib loaded?", typeof geolib !== "undefined");
+
     console.log(geolib.getDistance(
       { latitude: 45.36275, longitude: -71.06799 },
       { latitude: 45.36464, longitude: -71.06575 }

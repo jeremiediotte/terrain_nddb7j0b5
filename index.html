@@ -1,236 +1,151 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>AR Land Boundary Viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-<script src="https://cdn.rawgit.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://app.unpkg.com/geolib@2.0.24/files/dist/geolib.js"</script>
+    <title>AR Land Boundaries</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 
-<style>
-  #calibrate-btn {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 999;
-    background: #fff;
-    border: 1px solid #333;
-    padding: 5px 10px;
-    cursor: pointer;
-  }
-  #compass {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 20px;
-    color: white;
-    z-index: 999;
-    font-family: sans-serif;
-    background: rgba(0,0,0,0.3);
-    padding: 5px 10px;
-    border-radius: 5px;
-  }
-</style>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
+    <script src="https://raw.githack.com/donmccurdy/aframe-extras/master/dist/aframe-extras.loaders.min.js"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #debug {
+            position: absolute; 
+            top: 10px; left: 10px; 
+            background: rgba(0,0,0,0.7); 
+            color: #0f0; 
+            padding: 10px; 
+            font-family: monospace; 
+            z-index: 1000;
+            border-radius: 5px;
+        }
+    </style>
 </head>
-<body style="margin:0;overflow:hidden;">
-<button id="calibrate-btn">Calibrate Here</button>
-<div id="compass">North: 0°</div>
-<a-scene embedded arjs="sourceType: webcam; gpsMinAccuracy: 20;" vr-mode-ui="enabled: false">
-  <a-entity id="land-boundary"></a-entity>
-  <a-entity id="land-polygon"></a-entity>
-  <a-entity id="user-marker"></a-entity>
-  <a-camera id="camera" gps-camera rotation-reader></a-camera>
-</a-scene>
 
-<script>
-const corners = [
-  {lat: 45.36275270109053, lon: -71.06799299683564},
-  {lat: 45.36293636564523, lon: -71.0679651679721},
-  {lat: 45.36464470163011, lon: -71.0679992363567},
-  {lat: 45.36464382495869, lon: -71.06574886446494},
-  {lat: 45.364095005353214, lon: -71.06574970802724},
-  {lat: 45.36409469181381, lon: -71.06497117171959},
-  {lat: 45.36354587220936, lon: -71.06497202328269},
-  {lat: 45.36354618574768, lon: -71.06575055158952},
-  {lat: 45.36275185642023, lon: -71.06575805095848}
-];
+<body>
+    <div id="debug">Loading GPS...</div>
 
-const landEl = document.getElementById('land-boundary');
-const polygonEl = document.getElementById('land-polygon');
-const cameraEl = document.getElementById('camera');
-const compassEl = document.getElementById('compass');
-const userEl = document.getElementById('user-marker');
+    <script>
+        // YOUR DATA
+        const boundaryPoints = [
+          {lat: 45.36275270109053, lon: -71.06799299683564},
+          {lat: 45.36293636564523, lon: -71.0679651679721},
+          {lat: 45.36464470163011, lon: -71.0679992363567},
+          {lat: 45.36464382495869, lon: -71.06574886446494},
+          {lat: 45.364095005353214, lon: -71.06574970802724},
+          {lat: 45.36409469181381, lon: -71.06497117171959},
+          {lat: 45.36354587220936, lon: -71.06497202328269},
+          {lat: 45.36354618574768, lon: -71.06575055158952},
+          {lat: 45.36275185642023, lon: -71.06575805095848},
+          // Close the loop back to start
+          {lat: 45.36275270109053, lon: -71.06799299683564} 
+        ];
 
-let calibration = {lat: 0, lon: 0, calibrated: false};
-document.getElementById('calibrate-btn').addEventListener('click',()=>{
-  if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(pos=>{
-      calibration.lat=pos.coords.latitude;
-      calibration.lon=pos.coords.longitude;
-      calibration.calibrated=true;
-      alert('Calibration point set!');
-    });
-  }
-});
+        // Helper: Calculate distance between two coordinates (Haversine)
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth radius in meters
+            const φ1 = lat1 * Math.PI/180;
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2-lat1) * Math.PI/180;
+            const Δλ = (lon2-lon1) * Math.PI/180;
 
-// Lat/Lon to meters
-function latLonToMeters(lat, lon){
-  const first=corners[0];
-  const dx=geolib.getDistance({latitude:first.lat,longitude:first.lon},{latitude:first.lat,longitude:lon});
-  const dy=geolib.getDistance({latitude:first.lat,longitude:first.lon},{latitude:lat,longitude:first.lon});
-  return {x: lon>first.lon?dx:-dx, z: lat>first.lat?-dy:dy, y:0};
-}
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
-// Distance
-function distance(c1,c2){
-  return geolib.getDistance({latitude:c1.lat,longitude:c1.lon},{latitude:c2.lat,longitude:c2.lon});
-}
+            return R * c;
+        }
 
-// Angle at corner
-function angleAtCorner(prev,current,next){
-  const v1=[prev.lat-current.lat,prev.lon-current.lon];
-  const v2=[next.lat-current.lat,next.lon-current.lon];
-  const dot=v1[0]*v2[0]+v1[1]*v2[1];
-  const mag1=Math.sqrt(v1[0]**2+v1[1]**2);
-  const mag2=Math.sqrt(v2[0]**2+v2[1]**2);
-  return Math.acos(dot/(mag1*mag2))*(180/Math.PI);
-}
+        // Helper: Calculate midpoint between two coordinates
+        function getMidpoint(lat1, lon1, lat2, lon2) {
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const lat1Rad = lat1 * Math.PI / 180;
+            const lat2Rad = lat2 * Math.PI / 180;
+            const lon1Rad = lon1 * Math.PI / 180;
 
-// Cardinal color
-function cardinalColor(c1,c2){
-  const bearing=geolib.getRhumbLineBearing({latitude:c1.lat,longitude:c1.lon},{latitude:c2.lat,longitude:c2.lon});
-  if(bearing>=315||bearing<45) return 'red';
-  if(bearing>=45&&bearing<135) return 'green';
-  if(bearing>=135&&bearing<225) return 'blue';
-  return 'yellow';
-}
+            const Bx = Math.cos(lat2Rad) * Math.cos(dLon);
+            const By = Math.cos(lat2Rad) * Math.sin(dLon);
+            const lat3 = Math.atan2(Math.sin(lat1Rad) + Math.sin(lat2Rad), Math.sqrt((Math.cos(lat1Rad) + Bx) * (Math.cos(lat1Rad) + Bx) + By * By));
+            const lon3 = lon1Rad + Math.atan2(By, Math.cos(lat1Rad) + Bx);
 
-// Line thickness
-function scaleLineByDistance(obj){
-  const camPos=cameraEl.object3D.position;
-  const objPos=obj.object3D.position;
-  const dist=camPos.distanceTo(objPos);
-  obj.setAttribute('line','lineWidth',Math.min(Math.max(0.5/(dist/5),0.05),0.5));
-}
+            return {
+                lat: lat3 * 180 / Math.PI,
+                lon: lon3 * 180 / Math.PI
+            };
+        }
 
-// AR markers
-const cornerSpheres=[];
-const cornerTexts=[];
-corners.forEach((corner,i)=>{
-  const pos=latLonToMeters(corner.lat,corner.lon);
-  const sphere=document.createElement('a-sphere');
-  sphere.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
-  sphere.setAttribute('radius',0.5);
-  sphere.setAttribute('color','yellow');
-  sphere.setAttribute('opacity',0.8);
-  sphere.setAttribute('class','interactive');
-  landEl.appendChild(sphere);
-  cornerSpheres.push(sphere);
+        // Helper: Calculate bearing (angle) between two coordinates
+        function getBearing(lat1, lon1, lat2, lon2) {
+            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) -
+                      Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+            const brng = Math.atan2(y, x);
+            return (brng * 180 / Math.PI + 360) % 360; // Degrees
+        }
 
-  const prev=corners[(i-1+corners.length)%corners.length];
-  const next=corners[(i+1)%corners.length];
-  const ang=angleAtCorner(prev,corner,next).toFixed(1);
+        AFRAME.registerComponent('boundary-lines', {
+            init: function () {
+                const debug = document.getElementById('debug');
+                const scene = document.querySelector('a-scene');
 
-  const text=document.createElement('a-text');
-  text.setAttribute('value',ang+'°');
-  text.setAttribute('position',`${pos.x} 1.2 ${pos.z}`);
-  text.setAttribute('align','center');
-  text.setAttribute('color','white');
-  text.setAttribute('side','double');
-  text.setAttribute('look-at','#camera');
-  landEl.appendChild(text);
-  cornerTexts.push(text);
+                debug.innerHTML = "Generating " + (boundaryPoints.length - 1) + " segments...";
 
-  // Tap interaction
-  sphere.addEventListener('click',()=>{alert(`Corner ${i+1}\nLat: ${corner.lat}\nLon: ${corner.lon}`);});
-});
+                for (let i = 0; i < boundaryPoints.length - 1; i++) {
+                    const p1 = boundaryPoints[i];
+                    const p2 = boundaryPoints[i+1];
 
-// Draw lines
-const edgeLines=[];
-const edgeTexts=[];
-for(let i=0;i<corners.length;i++){
-  const c1=latLonToMeters(corners[i].lat,corners[i].lon);
-  const c2=latLonToMeters(corners[(i+1)%corners.length].lat,corners[(i+1)%corners.length].lon);
-  const color=cardinalColor(corners[i],corners[(i+1)%corners.length]);
-  const line=document.createElement('a-entity');
-  line.setAttribute('line',`start:${c1.x} ${c1.y} ${c1.z}; end:${c2.x} ${c2.y} ${c2.z}; color:${color}; lineWidth:0.1`);
-  line.setAttribute('class','interactive');
-  landEl.appendChild(line);
-  edgeLines.push(line);
+                    // 1. Get Midpoint (we place the object here)
+                    const mid = getMidpoint(p1.lat, p1.lon, p2.lat, p2.lon);
+                    
+                    // 2. Get Distance (length of the tube)
+                    const dist = getDistance(p1.lat, p1.lon, p2.lat, p2.lon);
 
-  const midX=(c1.x+c2.x)/2;
-  const midZ=(c1.z+c2.z)/2;
-  const dist=distance(corners[i],corners[(i+1)%corners.length]);
-  const text=document.createElement('a-text');
-  text.setAttribute('value',dist+'m');
-  text.setAttribute('position',`${midX} 1 ${midZ}`);
-  text.setAttribute('align','center');
-  text.setAttribute('color','white');
-  text.setAttribute('side','double');
-  text.setAttribute('look-at','#camera');
-  landEl.appendChild(text);
-  edgeTexts.push(text);
+                    // 3. Get Bearing (rotation of the tube)
+                    const angle = getBearing(p1.lat * Math.PI/180, p1.lon * Math.PI/180, 
+                                           p2.lat * Math.PI/180, p2.lon * Math.PI/180);
 
-  line.addEventListener('componentinitialized',()=>{setInterval(()=>scaleLineByDistance(line),100);});
-  line.addEventListener('click',()=>{alert(`Edge ${i+1}\nDistance: ${dist} meters`);});
-}
+                    // Create the anchor entity at the midpoint GPS location
+                    const entity = document.createElement('a-entity');
+                    entity.setAttribute('gps-new-entity-place', {
+                        latitude: mid.lat,
+                        longitude: mid.lon
+                    });
 
-// Polygon overlay
-const polygonPositions=corners.map(c=>latLonToMeters(c.lat,c.lon));
-const vertices=polygonPositions.map(p=>new THREE.Vector3(p.x,0.1,p.z));
-vertices.push(vertices[0].clone());
-const shape=new THREE.Shape(vertices.map(v=>new THREE.Vector2(v.x,v.z)));
-const geometry=new THREE.ShapeGeometry(shape);
-const material=new THREE.MeshBasicMaterial({color:0x00ff00,opacity:0.3,transparent:true,side:THREE.DoubleSide});
-const mesh=new THREE.Mesh(geometry, material); // <-- proper THREE.Mesh
-polygonEl.setObject3D('mesh', mesh);
+                    // Create the tube (Cylinder)
+                    // We rotate 90deg on X to lay it flat, and Y to match compass heading
+                    const tube = document.createElement('a-cylinder');
+                    tube.setAttribute('height', dist);
+                    tube.setAttribute('radius', 0.1); // Thickness of tube
+                    tube.setAttribute('color', 'red');
+                    tube.setAttribute('opacity', '0.8');
+                    // Position: 0 X, 0.3 Y (1 foot up), 0 Z
+                    tube.setAttribute('position', '0 0.3 0'); 
+                    // Rotation: Lay flat (90), Rotate to bearing (0 - angle)
+                    // Note: A-Frame rotation is YXZ. 
+                    tube.setAttribute('rotation', `90 ${0 - angle} 0`);
 
-// Compass
-if(window.DeviceOrientationEvent){
-  window.addEventListener('deviceorientationabsolute',event=>{
-    let alpha=event.alpha;
-    if(alpha===null)return;
-    alpha=Math.round(alpha);
-    compassEl.innerText='North: '+alpha+'°';
-  },true);
-}
+                    entity.appendChild(tube);
+                    scene.appendChild(entity);
+                }
 
-// Create user marker
-const userSphere=document.createElement('a-sphere');
-userSphere.setAttribute('radius',0.5);
-userSphere.setAttribute('color','red');
-userSphere.setAttribute('opacity',0.9);
-userEl.appendChild(userSphere);
+                debug.innerHTML = "Boundaries loaded. Look around.";
+            }
+        });
+    </script>
 
-// Real-time dynamic updates
-setInterval(()=>{
-  if(!cameraEl.components['gps-camera'] || !cameraEl.components['gps-camera'].gpsOrigin) return;
-  const camLat=cameraEl.components['gps-camera'].gpsOrigin.latitude;
-  const camLon=cameraEl.components['gps-camera'].gpsOrigin.longitude;
-  const camPos={lat:camLat, lon:camLon};
-
-  // Update corner distances
-  cornerTexts.forEach((text,i)=>{
-    const dist=distance(camPos,corners[i]);
-    text.setAttribute('value',`Dist: ${dist} m`);
-  });
-
-  // Update edge distances
-  edgeTexts.forEach((text,i)=>{
-    const p1=corners[i];
-    const p2=corners[(i+1)%corners.length];
-    const distToLine=geolib.getDistanceFromLine(camPos,p1,p2);
-    text.setAttribute('value',`Dist to edge: ${distToLine} m`);
-  });
-
-  // Update user marker position
-  const userPos=latLonToMeters(camLat,camLon);
-  userSphere.setAttribute('position',`${userPos.x} 0.1 ${userPos.z}`);
-
-},500);
-
-</script>
+    <a-scene
+        vr-mode-ui="enabled: false"
+        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+        renderer="antialias: true; alpha: true">
+        
+        <a-camera gps-new-camera='gpsMinDistance: 5' rotation-reader></a-camera>
+        
+        <a-entity boundary-lines></a-entity>
+        
+    </a-scene>
 </body>
 </html>

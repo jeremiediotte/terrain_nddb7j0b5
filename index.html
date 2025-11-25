@@ -1,46 +1,92 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Precision AR Boundaries</title>
+    <title>Saved AR Boundaries</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
+
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        #overlay {
+        body { margin: 0; overflow: hidden; font-family: monospace; }
+        
+        /* TOP MENU (Save/Load) */
+        #top-menu {
             position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between;
+            z-index: 1000; pointer-events: auto;
+        }
+        
+        .menu-btn {
             background: rgba(0,0,0,0.8); color: white;
-            padding: 15px; border-radius: 8px; z-index: 1000;
-            text-align: center;
+            border: 1px solid #555; padding: 8px 15px;
+            font-size: 14px; border-radius: 4px;
+            cursor: pointer; text-transform: uppercase;
         }
-        #status-bar {
-            height: 4px; background: #444; width: 100%; margin-top: 10px;
+        .save-btn { border-color: #0f0; color: #0f0; }
+        .clear-btn { border-color: #f00; color: #f00; }
+
+        /* BOTTOM CONTROLS (Joystick) */
+        #ui-layer {
+            position: absolute; bottom: 30px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center;
+            pointer-events: none; z-index: 999;
         }
-        #status-progress {
-            height: 100%; background: #0f0; width: 0%; transition: width 0.2s;
+        
+        .control-row {
+            display: flex; gap: 15px; margin-bottom: 15px; pointer-events: auto;
         }
-        button {
-            margin-top: 10px; padding: 10px 20px;
-            background: #0f0; border: none; font-weight: bold; cursor: pointer;
-            display: none;
+
+        .ctrl-btn {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #00ffcc; color: #00ffcc;
+            font-size: 24px; width: 60px; height: 60px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            user-select: none;
+        }
+        .ctrl-btn:active { background: #00ffcc; color: black; }
+
+        #status-msg {
+            position: absolute; top: 60px; width: 100%;
+            text-align: center; color: yellow; text-shadow: 1px 1px black;
+            font-weight: bold; pointer-events: none;
         }
     </style>
 </head>
 
 <body>
-    <div id="overlay">
-        <div id="msg">Initializing GPS...</div>
-        <div id="status-bar"><div id="status-progress"></div></div>
-        <button id="start-btn" onclick="startAR()">SHOW BOUNDARIES</button>
+    <div id="top-menu">
+        <button class="menu-btn clear-btn" onclick="clearSettings()">Reset</button>
+        <div style="background:rgba(0,0,0,0.5);padding:5px;color:white" id="coord-display">0.0, 0.0</div>
+        <button class="menu-btn save-btn" onclick="saveSettings()">SAVE</button>
+    </div>
+    
+    <div id="status-msg">Loading...</div>
+
+    <div id="ui-layer">
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('rot', 2)">↻</button>
+            <button class="ctrl-btn" onclick="toggleHeight()">↕</button>
+            <button class="ctrl-btn" onclick="adjust('rot', -2)">↺</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('z', -0.5)">▲</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('x', -0.5)">◀</button>
+            <button class="ctrl-btn" onclick="resetLive()">●</button>
+            <button class="ctrl-btn" onclick="adjust('x', 0.5)">▶</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('z', 0.5)">▼</button>
+        </div>
     </div>
 
     <script>
         // --- CONFIGURATION ---
-        // How many GPS samples to average before locking position
-        const SAMPLE_COUNT = 20; 
-        
         const boundaryPoints = [
           {lat: 45.36275270109053, lon: -71.06799299683564},
           {lat: 45.36293636564523, lon: -71.0679651679721},
@@ -51,133 +97,161 @@
           {lat: 45.36354587220936, lon: -71.06497202328269},
           {lat: 45.36354618574768, lon: -71.06575055158952},
           {lat: 45.36275185642023, lon: -71.06575805095848},
-          {lat: 45.36275270109053, lon: -71.06799299683564} 
+          {lat: 45.36275270109053, lon: -71.06799299683564}
         ];
 
-        // --- GPS AVERAGING LOGIC ---
-        let samples = [];
-        let watchId = null;
+        // State Variables
+        let offsetState = { x: 0, z: 0, rot: 0 };
+        let currentHeight = 0.5;
+        let shapeContainer = null;
 
-        function initGPS() {
-            if (!navigator.geolocation) {
-                document.getElementById('msg').innerText = "Geolocation not supported.";
-                return;
+        // --- LOCAL STORAGE LOGIC ---
+        function loadSettings() {
+            const saved = localStorage.getItem('arBoundaryCalib');
+            if (saved) {
+                offsetState = JSON.parse(saved);
+                document.getElementById('status-msg').innerText = "Calibration Loaded!";
+            } else {
+                document.getElementById('status-msg').innerText = "No saved data found.";
             }
-            
-            document.getElementById('msg').innerText = "Calibrating Position (Stand Still)... 0/" + SAMPLE_COUNT;
-
-            const options = {
-                enableHighAccuracy: true,
-                timeout: 5000,
-                maximumAge: 0
-            };
-
-            watchId = navigator.geolocation.watchPosition(
-                (pos) => {
-                    // Collect sample
-                    samples.push({
-                        lat: pos.coords.latitude,
-                        lon: pos.coords.longitude
-                    });
-
-                    // Update UI
-                    const progress = (samples.length / SAMPLE_COUNT) * 100;
-                    document.getElementById('status-progress').style.width = progress + "%";
-                    document.getElementById('msg').innerText = `Calibrating: ${samples.length}/${SAMPLE_COUNT}\nAccuracy: ±${Math.round(pos.coords.accuracy)}m`;
-
-                    if (samples.length >= SAMPLE_COUNT) {
-                        finishCalibration();
-                    }
-                }, 
-                (err) => console.error(err), 
-                options
-            );
+            updateDisplay();
         }
 
-        function finishCalibration() {
-            navigator.geolocation.clearWatch(watchId);
-            
-            // Calculate average
-            let avgLat = 0, avgLon = 0;
-            samples.forEach(s => { avgLat += s.lat; avgLon += s.lon; });
-            avgLat /= samples.length;
-            avgLon /= samples.length;
-
-            // Store user's start position for relative offset (optional if using absolute)
-            // But mainly, we are now ready to render
-            document.getElementById('msg').innerHTML = "Position Locked!<br>Avg Accuracy Reached.";
-            document.getElementById('start-btn').style.display = "inline-block";
-            
-            // Note: AR.js handles the camera updating, but we waited to ensure 
-            // the GPS hardware is "warmed up" and stable before the user starts looking.
+        function saveSettings() {
+            localStorage.setItem('arBoundaryCalib', JSON.stringify(offsetState));
+            const msg = document.getElementById('status-msg');
+            msg.innerText = "CALIBRATION SAVED!";
+            msg.style.color = "#0f0";
+            setTimeout(() => { msg.style.color = "yellow"; }, 2000);
         }
 
-        function startAR() {
-            document.getElementById('overlay').style.display = 'none';
-            // Trigger the A-Frame component generation
-            const scene = document.querySelector('a-scene');
-            const generator = document.createElement('a-entity');
-            generator.setAttribute('boundary-lines', '');
-            scene.appendChild(generator);
+        function clearSettings() {
+            if(confirm("Reset all calibration to zero?")) {
+                localStorage.removeItem('arBoundaryCalib');
+                offsetState = { x: 0, z: 0, rot: 0 };
+                applyTransforms();
+                document.getElementById('status-msg').innerText = "Calibration Reset.";
+            }
         }
 
-        // --- MATH HELPERS ---
-        function getDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; 
-            const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
-            const Δφ = (lat2-lat1) * Math.PI/180, Δλ = (lon2-lon1) * Math.PI/180;
-            const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        // --- GEOMETRY GENERATION ---
+        function getLocalPosition(anchor, point) {
+            const dist = geolib.getDistance(anchor, point);
+            const bearing = geolib.getRhumbLineBearing(anchor, point);
+            const rad = bearing * (Math.PI / 180);
+            return { x: dist * Math.sin(rad), z: -dist * Math.cos(rad) };
         }
 
-        function getMidpoint(lat1, lon1, lat2, lon2) {
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const lat1Rad = lat1 * Math.PI / 180, lat2Rad = lat2 * Math.PI / 180, lon1Rad = lon1 * Math.PI / 180;
-            const Bx = Math.cos(lat2Rad) * Math.cos(dLon);
-            const By = Math.cos(lat2Rad) * Math.sin(dLon);
-            const lat3 = Math.atan2(Math.sin(lat1Rad) + Math.sin(lat2Rad), Math.sqrt((Math.cos(lat1Rad) + Bx)**2 + By**2));
-            const lon3 = lon1Rad + Math.atan2(By, Math.cos(lat1Rad) + Bx);
-            return { lat: lat3 * 180 / Math.PI, lon: lon3 * 180 / Math.PI };
-        }
+        AFRAME.registerComponent('boundary-generator', {
+            init: function() {
+                loadSettings(); // Try to load saved data on startup
 
-        function getBearing(lat1, lon1, lat2, lon2) {
-            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
-            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-        }
+                const scene = this.el.sceneEl;
+                const anchor = boundaryPoints[0];
 
-        // --- AR RENDERER ---
-        AFRAME.registerComponent('boundary-lines', {
-            init: function () {
-                const scene = document.querySelector('a-scene');
+                // Create Anchor at First GPS Point
+                const root = document.createElement('a-entity');
+                root.setAttribute('gps-new-entity-place', {
+                    latitude: anchor.lat,
+                    longitude: anchor.lon
+                });
+
+                // Create Container for Offsets
+                shapeContainer = document.createElement('a-entity');
+                root.appendChild(shapeContainer);
+
+                // Draw Lines
                 for (let i = 0; i < boundaryPoints.length - 1; i++) {
                     const p1 = boundaryPoints[i];
                     const p2 = boundaryPoints[i+1];
-                    const mid = getMidpoint(p1.lat, p1.lon, p2.lat, p2.lon);
-                    const dist = getDistance(p1.lat, p1.lon, p2.lat, p2.lon);
-                    const angle = getBearing(p1.lat * Math.PI/180, p1.lon * Math.PI/180, p2.lat * Math.PI/180, p2.lon * Math.PI/180);
+                    
+                    const pos1 = getLocalPosition(anchor, p1);
+                    const pos2 = getLocalPosition(anchor, p2);
 
-                    const entity = document.createElement('a-entity');
-                    entity.setAttribute('gps-new-entity-place', { latitude: mid.lat, longitude: mid.lon });
+                    const dx = pos2.x - pos1.x;
+                    const dz = pos2.z - pos1.z;
+                    const len = Math.sqrt(dx*dx + dz*dz);
+                    const angleDeg = Math.atan2(dx, dz) * (180 / Math.PI);
+                    const midX = (pos1.x + pos2.x) / 2;
+                    const midZ = (pos1.z + pos2.z) / 2;
 
                     const tube = document.createElement('a-cylinder');
-                    tube.setAttribute('height', dist);
-                    tube.setAttribute('radius', 0.05); // Thinner, more precise looking
-                    tube.setAttribute('color', '#00ffcc'); // Neon cyan for visibility
-                    tube.setAttribute('opacity', '0.9');
-                    tube.setAttribute('position', '0 0 0'); 
-                    tube.setAttribute('rotation', `90 ${0 - angle} 0`);
-                    
-                    entity.appendChild(tube);
-                    scene.appendChild(entity);
+                    tube.setAttribute('height', len);
+                    tube.setAttribute('radius', 0.08);
+                    tube.setAttribute('color', '#00ffcc');
+                    tube.setAttribute('opacity', '0.8');
+                    tube.setAttribute('position', `${midX} ${currentHeight} ${midZ}`);
+                    tube.setAttribute('rotation', `90 ${angleDeg} 0`);
+
+                    shapeContainer.appendChild(tube);
                 }
+
+                scene.appendChild(root);
+                
+                // Apply the loaded (or default) offsets immediately
+                applyTransforms(); 
             }
         });
 
-        window.onload = initGPS;
+        // --- INTERACTION LOGIC ---
+        function adjust(axis, val) {
+            if (!shapeContainer) return;
+
+            if (axis === 'x') offsetState.x += val;
+            if (axis === 'z') offsetState.z += val;
+            if (axis === 'rot') offsetState.rot += val;
+
+            applyTransforms();
+        }
+
+        function resetLive() {
+            // Only resets current session view, doesn't delete storage unless they click Clear
+            offsetState.x = 0; offsetState.z = 0;
+            applyTransforms();
+        }
+
+        function applyTransforms() {
+            if (!shapeContainer) return;
+            
+            // Apply Position
+            shapeContainer.setAttribute('position', {
+                x: offsetState.x,
+                y: 0,
+                z: offsetState.z
+            });
+
+            // Apply Rotation
+            shapeContainer.setAttribute('rotation', {
+                x: 0,
+                y: offsetState.rot,
+                z: 0
+            });
+
+            updateDisplay();
+        }
+
+        function toggleHeight() {
+             if (!shapeContainer) return;
+             currentHeight = (currentHeight < 1.0) ? 1.6 : 0.3;
+             const children = shapeContainer.querySelectorAll('a-cylinder');
+             children.forEach(child => {
+                 let p = child.getAttribute('position');
+                 p.y = currentHeight;
+                 child.setAttribute('position', p);
+             });
+        }
+
+        function updateDisplay() {
+             document.getElementById('coord-display').innerText = 
+                 `X:${offsetState.x.toFixed(1)} Z:${offsetState.z.toFixed(1)} R:${offsetState.rot}°`;
+        }
     </script>
 
-    <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;" renderer="antialias: true; alpha: true">
+    <a-scene
+        boundary-generator
+        vr-mode-ui="enabled: false"
+        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+        renderer="antialias: true; alpha: true">
         <a-camera gps-new-camera='gpsMinDistance: 5'></a-camera>
     </a-scene>
 </body>

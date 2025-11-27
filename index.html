@@ -1,186 +1,73 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Debugger</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
-
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        
-        #console {
-            position: absolute; top: 0; left: 0; width: 100%;
-            background: rgba(0,0,0,0.85); color: #0f0;
-            padding: 10px; box-sizing: border-box;
-            z-index: 1000;
-        }
-
-        h3 { margin: 0 0 5px 0; color: white; }
-        .data-row { display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px solid #333; }
-        .val { font-weight: bold; color: yellow; }
-
-        #force-btn {
-            width: 100%; padding: 15px; margin-top: 10px;
-            background: #ff0055; color: white; border: none;
-            font-size: 18px; font-weight: bold; border-radius: 5px;
-            cursor: pointer;
-        }
+        body { background: black; color: #0f0; font-family: monospace; font-size: 18px; padding: 20px; }
+        .error { color: red; border: 1px solid red; padding: 10px; }
+        button { font-size: 20px; padding: 15px; width: 100%; margin-top: 20px; }
     </style>
 </head>
-
 <body>
-    <div id="console">
-        <h3>AR Diagnostics</h3>
-        <div class="data-row"><span>Status:</span> <span id="status" style="color:cyan">Waiting for GPS...</span></div>
-        <div class="data-row"><span>Accuracy:</span> <span id="acc" class="val">--</span></div>
-        <div class="data-row"><span>Dist to Start:</span> <span id="dist" class="val">--</span></div>
-        
-        <button id="force-btn" onclick="teleportHere()">TEST MODE: Draw Here</button>
-        <p style="font-size:12px; color:#ccc;">*Click above if you are not currently on the land.</p>
-    </div>
+    <h2>BROWSER GPS DIAGNOSTIC</h2>
+    <div id="log">Initializing...</div>
+    <div id="details"></div>
+    <button onclick="forceRequest()">RE-REQUEST PERMISSION</button>
 
     <script>
-        // --- DATA ---
-        // We use 'let' so we can overwrite them in Test Mode
-        let boundaryPoints = [
-          {lat: 45.36275270109053, lon: -71.06799299683564},
-          {lat: 45.36293636564523, lon: -71.0679651679721},
-          {lat: 45.36464470163011, lon: -71.0679992363567},
-          {lat: 45.36464382495869, lon: -71.06574886446494},
-          {lat: 45.364095005353214, lon: -71.06574970802724},
-          {lat: 45.36409469181381, lon: -71.06497117171959},
-          {lat: 45.36354587220936, lon: -71.06497202328269},
-          {lat: 45.36354618574768, lon: -71.06575055158952},
-          {lat: 45.36275185642023, lon: -71.06575805095848},
-          {lat: 45.36275270109053, lon: -71.06799299683564}
-        ];
+        const log = document.getElementById('log');
+        const det = document.getElementById('details');
 
-        let currentPos = null;
-        let isLoaded = false;
-
-        // --- UTILS ---
-        function updateDebug(pos) {
-            currentPos = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-            
-            // Calculate distance to the REAL start point
-            const d = geolib.getDistance(currentPos, { 
-                latitude: boundaryPoints[0].lat, 
-                longitude: boundaryPoints[0].lon 
-            });
-
-            document.getElementById('status').innerText = "GPS Locked";
-            document.getElementById('acc').innerText = Math.round(pos.coords.accuracy) + "m";
-            document.getElementById('dist').innerText = d + " meters";
-            
-            if (d > 1000 && !isLoaded) {
-                 document.getElementById('status').innerText = "⚠ TOO FAR FROM LAND";
-                 document.getElementById('status').style.color = "red";
-            }
+        function print(msg, isError) {
+            log.innerHTML = msg;
+            if(isError) log.className = "error";
+            else log.className = "";
         }
 
-        function getLocalPosition(anchor, point) {
-            const dist = geolib.getDistance(anchor, point);
-            const bearing = geolib.getRhumbLineBearing(anchor, point);
-            const rad = bearing * (Math.PI / 180);
-            return { x: dist * Math.sin(rad), z: -dist * Math.cos(rad) };
+        function showDetails(pos) {
+            det.innerHTML = 
+                "Lat: " + pos.coords.latitude.toFixed(6) + "<br>" +
+                "Lon: " + pos.coords.longitude.toFixed(6) + "<br>" +
+                "Accuracy: " + Math.round(pos.coords.accuracy) + " meters<br>" +
+                "Timestamp: " + new Date(pos.timestamp).toLocaleTimeString();
         }
 
-        function drawBoundaries(anchor) {
-            const scene = document.querySelector('a-scene');
-            
-            // Remove old entities if any
-            const old = document.getElementById('boundary-root');
-            if (old) old.parentNode.removeChild(old);
-
-            const root = document.createElement('a-entity');
-            root.setAttribute('id', 'boundary-root');
-            
-            // IMPORTANT: If we are teleporting, we use "0 0 0" (user position)
-            // If we are using real GPS, we use gps-new-entity-place
-            if (anchor === 'USER') {
-                root.setAttribute('position', '0 0 0'); // Relative to camera start
-                document.getElementById('status').innerText = "MODE: LOCAL TEST";
-            } else {
-                root.setAttribute('gps-new-entity-place', {
-                    latitude: anchor.lat,
-                    longitude: anchor.lon
-                });
-                document.getElementById('status').innerText = "MODE: REAL GPS";
-            }
-
-            // RED TOWER (The Anchor)
-            const tower = document.createElement('a-cylinder');
-            tower.setAttribute('color', 'red');
-            tower.setAttribute('height', '50');
-            tower.setAttribute('radius', '1');
-            tower.setAttribute('position', '0 25 0');
-            root.appendChild(tower);
-
-            // Calculate shapes relative to the first point
-            const realAnchor = boundaryPoints[0];
-
-            for (let i = 0; i < boundaryPoints.length - 1; i++) {
-                const p1 = boundaryPoints[i];
-                const p2 = boundaryPoints[i+1];
-                
-                // Get offsets from the Real Anchor
-                const pos1 = getLocalPosition(realAnchor, p1);
-                const pos2 = getLocalPosition(realAnchor, p2);
-
-                const dx = pos2.x - pos1.x;
-                const dz = pos2.z - pos1.z;
-                const len = Math.sqrt(dx*dx + dz*dz);
-                const angleDeg = Math.atan2(dx, dz) * (180 / Math.PI);
-                const midX = (pos1.x + pos2.x) / 2;
-                const midZ = (pos1.z + pos2.z) / 2;
-
-                const wall = document.createElement('a-box');
-                wall.setAttribute('depth', len);
-                wall.setAttribute('height', '20'); 
-                wall.setAttribute('width', '0.5');
-                wall.setAttribute('color', 'yellow');
-                wall.setAttribute('opacity', '0.5');
-                wall.setAttribute('position', `${midX} 10 ${midZ}`);
-                wall.setAttribute('rotation', `0 ${angleDeg} 0`);
-                
-                root.appendChild(wall);
-            }
-            scene.appendChild(root);
-            isLoaded = true;
-        }
-
-        // --- BUTTON ACTIONS ---
-        function teleportHere() {
-            if (!currentPos) {
-                alert("Wait for GPS lock first...");
+        function startWatch() {
+            if (!navigator.geolocation) {
+                print("ERROR: Geolocation API not found. Are you using a modern browser?", true);
                 return;
             }
-            // Draw the shape treating the USER's location as the first point
-            drawBoundaries('USER');
+
+            print("Requesting high-accuracy GPS...");
+
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    print("SUCCESS! GPS Signal Received.");
+                    showDetails(pos);
+                },
+                (err) => {
+                    let errName = "";
+                    switch(err.code) {
+                        case 1: errName = "PERMISSION_DENIED"; break;
+                        case 2: errName = "POSITION_UNAVAILABLE"; break;
+                        case 3: errName = "TIMEOUT"; break;
+                    }
+                    print("ERROR: " + errName + "<br>" + err.message, true);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 20000,
+                    maximumAge: 0
+                }
+            );
         }
 
-        // Auto-start normal mode if we are close enough (<100m)
-        window.addEventListener('gps-camera-update-position', (e) => {
-            updateDebug(e.detail.position);
-            // If we are close (e.g. on the land) and haven't loaded yet, load automatically
-            if (!isLoaded && geolib.getDistance(currentPos, boundaryPoints[0]) < 200) {
-                 drawBoundaries(boundaryPoints[0]);
-            }
-        });
+        function forceRequest() {
+            log.innerHTML = "Re-requesting...";
+            startWatch();
+        }
 
+        // Start immediately
+        startWatch();
     </script>
-
-    <a-scene
-        vr-mode-ui="enabled: false"
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-        renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;">
-        
-        <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
-        
-    </a-scene>
 </body>
 </html>

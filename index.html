@@ -12,8 +12,15 @@
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
         
-        /* The Manual Video Element (hidden behind the scene) */
-        #ar-video-source { position: absolute; z-index: -10; }
+        /* FIX 1A: Ensure video takes up the whole background and sits just under the AR canvas */
+        #ar-video-source { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: -2; 
+        }
 
         /* Initial Loading Screen */
         #initial-screen {
@@ -54,7 +61,7 @@
     <video id="ar-video-source" autoplay playsinline></video>
 
     <div id="initial-screen">
-        <h2>Initiating Camera & GPS Jerry2</h2>
+        <h2>Initiating Camera & GPS j2 </h2>
         <p id="msg">Awaiting secure camera and high-accuracy lock...</p>
         <button id="start-btn" onclick="startAR()">LOAD BOUNDARIES</button>
     </div>
@@ -87,7 +94,11 @@
 
     <a-scene
         vr-mode-ui="enabled: false"
-        renderer="antialias: true; alpha: true;"> <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; debugUIEnabled: false;">
+        renderer="antialias: true; alpha: true;"> 
+        
+        <a-light type="ambient" color="#FFF" intensity="1.0"></a-light>
+
+        <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; debugUIEnabled: false;">
             <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
         </a-entity>
         
@@ -280,7 +291,7 @@
                         
                         const sceneEl = document.querySelector('a-scene');
                         
-                        // *** CRITICAL FIX: videoTexture is set to TRUE here for brightness ***
+                        // *** CRITICAL FIX: videoTexture: true AND passing dimensions ***
                         sceneEl.querySelector('[arjs]').setAttribute('arjs', 
                             `sourceType: video; sourceUrl: #ar-video-source; videoTexture: true; debugUIEnabled: false; display: look-at;`);
                         
@@ -319,6 +330,12 @@
             const generator = document.createElement('a-entity');
             generator.setAttribute('boundary-walls', '');
             document.querySelector('#ar-content-placeholder').appendChild(generator);
+
+            // FIX 1B: Ensure A-Frame canvas background is completely transparent
+            const arCanvas = document.querySelector('canvas.a-canvas');
+            if (arCanvas) {
+                arCanvas.style.backgroundColor = 'transparent';
+            }
         }
 
         window.onload = () => {

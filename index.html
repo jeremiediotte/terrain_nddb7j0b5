@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Manual Camera Fix</title>
+    <title>FINAL AR Boundary Calibrator</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     
@@ -13,23 +13,40 @@
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
         
         /* The Manual Video Element (hidden behind the scene) */
-        #ar-video-source {
-            position: absolute;
-            z-index: -10; /* Keep it far behind the scene */
-        }
+        #ar-video-source { position: absolute; z-index: -10; }
 
+        /* Initial Loading Screen */
         #initial-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9); color: white;
             display: flex; flex-direction: column; justify-content: center;
-            align-items: center; text-align: center;
-            z-index: 9999;
+            align-items: center; text-align: center; z-index: 9999;
         }
-        #initial-screen button {
-            padding: 15px 30px; font-size: 18px; 
-            background: #00ffcc; border: none; 
-            border-radius: 5px; cursor: pointer;
+        #initial-screen button { padding: 15px 30px; font-size: 18px; background: #00ffcc; border: none; border-radius: 5px; cursor: pointer; }
+        
+        /* --- UI CONTROLS --- */
+        #top-menu { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; z-index: 1000; pointer-events: auto; }
+        .menu-btn { background: rgba(0,0,0,0.8); color: white; border: 1px solid #555; padding: 8px 15px; font-size: 14px; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+        .save-btn { border-color: #0f0; color: #0f0; }
+        .clear-btn { border-color: #f00; color: #f00; }
+
+        #ui-layer {
+            position: absolute; bottom: 30px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center;
+            pointer-events: none; z-index: 999;
         }
+        
+        .control-row {
+            display: flex; gap: 15px; margin-bottom: 15px; pointer-events: auto;
+        }
+
+        .ctrl-btn {
+            background: rgba(0, 0, 0, 0.6); border: 2px solid #00ffcc; color: #00ffcc;
+            font-size: 24px; width: 60px; height: 60px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; user-select: none;
+        }
+        .ctrl-btn:active { background: #00ffcc; color: black; }
+        
     </style>
 </head>
 
@@ -41,6 +58,32 @@
         <p id="msg">Awaiting secure camera and high-accuracy lock...</p>
         <button id="start-btn" onclick="startAR()">LOAD BOUNDARIES</button>
     </div>
+
+    <div id="top-menu" style="display:none;">
+        <button class="menu-btn clear-btn" onclick="clearSettings()">RESET</button>
+        <div style="background:rgba(0,0,0,0.5);padding:5px;color:white" id="coord-display">0.0, 0.0</div>
+        <button class="menu-btn save-btn" onclick="saveSettings()">SAVE</button>
+    </div>
+
+    <div id="ui-layer" style="display:none;">
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('rot', 2)">↻</button>
+            <button class="ctrl-btn" onclick="toggleHeight()">↕</button>
+            <button class="ctrl-btn" onclick="adjust('rot', -2)">↺</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('z', -0.2)">▲</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('x', -0.2)">◀</button>
+            <button class="ctrl-btn" onclick="resetLive()">●</button>
+            <button class="ctrl-btn" onclick="adjust('x', 0.2)">▶</button>
+        </div>
+        <div class="control-row">
+            <button class="ctrl-btn" onclick="adjust('z', 0.2)">▼</button>
+        </div>
+    </div>
+
 
     <a-scene
         vr-mode-ui="enabled: false"
@@ -68,9 +111,39 @@
           {lat: 45.36275270109053, lon: -71.06799299683564}
         ];
         
+        // State Variables
+        let offsetState = { x: 0, z: 0, rot: 0 };
+        let currentHeight = 0.5;
+        let shapeContainer = null;
         let cameraReady = false;
         let gpsReady = false;
 
+        // --- LOCAL STORAGE LOGIC ---
+        function loadSettings() {
+            const saved = localStorage.getItem('arBoundaryCalib');
+            if (saved) {
+                offsetState = JSON.parse(saved);
+            }
+            // Apply loaded or default settings
+            applyTransforms(); 
+        }
+
+        function saveSettings() {
+            localStorage.setItem('arBoundaryCalib', JSON.stringify(offsetState));
+            const display = document.getElementById('coord-display');
+            display.style.color = 'lime';
+            display.innerText = 'SAVED!';
+            setTimeout(() => { display.style.color = 'white'; updateDisplay(); }, 1500);
+        }
+
+        function clearSettings() {
+            if(confirm("Reset all calibration to zero?")) {
+                localStorage.removeItem('arBoundaryCalib');
+                offsetState = { x: 0, z: 0, rot: 0 };
+                applyTransforms();
+            }
+        }
+        
         // --- GEOMETRY HELPERS ---
         function getLocalPosition(anchor, point) {
             const dist = geolib.getDistance(anchor, point);
@@ -82,13 +155,21 @@
         // --- AR GENERATOR COMPONENT ---
         AFRAME.registerComponent('boundary-walls', {
             init: function() {
-                const anchor = boundaryPoints[0];
+                loadSettings(); // Load persisted offsets
 
+                const anchor = boundaryPoints[0];
+                
+                // 1. Create the GPS Anchor (The "Root")
                 const root = document.createElement('a-entity');
                 root.setAttribute('gps-new-entity-place', {
                     latitude: anchor.lat,
                     longitude: anchor.lon
                 });
+                
+                // 2. Create the calibration container (This is what we move with buttons)
+                shapeContainer = document.createElement('a-entity');
+                shapeContainer.setAttribute('id', 'calibration-rig');
+                root.appendChild(shapeContainer);
 
                 // Giant RED TOWER (Anchor Marker)
                 const marker = document.createElement('a-cylinder');
@@ -96,7 +177,7 @@
                 marker.setAttribute('height', '50'); 
                 marker.setAttribute('radius', '1');
                 marker.setAttribute('position', '0 25 0'); 
-                root.appendChild(marker);
+                shapeContainer.appendChild(marker); // Attach marker to container
 
                 // Walls (High Visibility)
                 for (let i = 0; i < boundaryPoints.length - 1; i++) {
@@ -120,17 +201,79 @@
                     wall.setAttribute('color', 'yellow');
                     wall.setAttribute('opacity', '0.5');
                     wall.setAttribute('position', `${midX} 10 ${midZ}`);
-                    // Apply the rotation fix we discussed
+                    // Apply the rotation fix we found: add 90 degrees to align Z-up world with X-right geometry
                     wall.setAttribute('rotation', `0 ${angleDeg + 90} 0`); 
                     
-                    root.appendChild(wall);
+                    shapeContainer.appendChild(wall);
                 }
 
                 document.querySelector('#ar-content-placeholder').appendChild(root);
-                document.getElementById('msg').innerText = "Look around for the red tower!";
-                document.getElementById('initial-screen').style.display = 'none';
+                
+                // Apply loaded transforms after drawing
+                applyTransforms();
+                
+                // Show controls
+                document.getElementById('top-menu').style.display = 'flex';
+                document.getElementById('ui-layer').style.display = 'flex';
+                
             }
         });
+
+        // --- INTERACTION LOGIC ---
+        function adjust(axis, val) {
+            if (!shapeContainer) return;
+
+            if (axis === 'x') offsetState.x += val;
+            if (axis === 'z') offsetState.z += val;
+            // Rotation amount is in degrees, so we don't need a small step size like 0.2
+            if (axis === 'rot') offsetState.rot += val; 
+
+            applyTransforms();
+        }
+
+        function resetLive() {
+            // Only resets current session view, doesn't delete storage
+            offsetState.x = 0; offsetState.z = 0;
+            offsetState.rot = 0;
+            applyTransforms();
+        }
+
+        function applyTransforms() {
+            if (!shapeContainer) return;
+            
+            // Apply Position (X/Z offset, Y is always 0 relative to GPS anchor)
+            shapeContainer.setAttribute('position', {
+                x: offsetState.x,
+                y: 0,
+                z: offsetState.z
+            });
+
+            // Apply Rotation (around the Y-axis)
+            shapeContainer.setAttribute('rotation', {
+                x: 0,
+                y: offsetState.rot,
+                z: 0
+            });
+
+            updateDisplay();
+        }
+
+        function toggleHeight() {
+             if (!shapeContainer) return;
+             // Toggle between 0.5m (low) and 1.6m (eye level)
+             currentHeight = (currentHeight < 1.0) ? 1.6 : 0.5;
+             const children = shapeContainer.querySelectorAll('a-box');
+             children.forEach(child => {
+                 let p = child.getAttribute('position');
+                 p.y = currentHeight;
+                 child.setAttribute('position', p);
+             });
+        }
+
+        function updateDisplay() {
+             document.getElementById('coord-display').innerText = 
+                 `X:${offsetState.x.toFixed(1)} Z:${offsetState.z.toFixed(1)} R:${offsetState.rot.toFixed(1)}°`;
+        }
 
         // --- MANUAL CAMERA & GPS INITIALIZATION ---
         function updateReadyStatus() {
@@ -152,8 +295,7 @@
                     };
                 })
                 .catch(err => {
-                    document.getElementById('msg').innerHTML = "ERROR: Camera access denied or unavailable. Check permissions.";
-                    console.error('Camera Error:', err);
+                    document.getElementById('msg').innerHTML = "ERROR: Camera access denied. Check permissions.";
                 });
         }
         
@@ -168,11 +310,7 @@
         
         function initGps() {
              if (navigator.geolocation) {
-                 navigator.geolocation.watchPosition(
-                    checkGpsStatus,
-                    (err) => { document.getElementById('msg').innerHTML = "GPS Error. Check Location Services."; },
-                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-                );
+                 navigator.geolocation.watchPosition(checkGpsStatus, (err) => { document.getElementById('msg').innerHTML = "GPS Error. Check Location Services."; }, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
             }
         }
 
@@ -180,12 +318,12 @@
             // Manually add the component to trigger the drawing
             const generator = document.createElement('a-entity');
             generator.setAttribute('boundary-walls', '');
-            document.querySelector('a-scene').appendChild(generator);
+            document.querySelector('#ar-content-placeholder').appendChild(generator);
         }
 
         window.onload = () => {
-            initCamera(); // Start camera request immediately
-            initGps();    // Start GPS request immediately
+            initCamera(); 
+            initGps();    
         };
     </script>
 </body>

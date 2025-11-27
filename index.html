@@ -89,7 +89,7 @@
         vr-mode-ui="enabled: false"
         renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"> 
         
-        <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; videoTexture: true; debugUIEnabled: false;">
+        <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; debugUIEnabled: false;">
             <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
         </a-entity>
         
@@ -225,7 +225,6 @@
 
             if (axis === 'x') offsetState.x += val;
             if (axis === 'z') offsetState.z += val;
-            // Rotation amount is in degrees, so we don't need a small step size like 0.2
             if (axis === 'rot') offsetState.rot += val; 
 
             applyTransforms();
@@ -290,12 +289,25 @@
                     video.srcObject = stream;
                     video.onloadedmetadata = () => {
                         video.play();
+                        
+                        // Set AR.js source parameters using the detected video resolution
+                        const sceneEl = document.querySelector('a-scene');
+                        sceneEl.querySelector('[arjs]').setAttribute('arjs', 
+                            `sourceType: video; sourceUrl: #ar-video-source; videoTexture: false; debugUIEnabled: false; display: look-at;`);
+                        
+                        // Set the correct resolution on the AR scene element itself
+                        sceneEl.setAttribute('arjs', {
+                            sourceWidth: video.videoWidth,
+                            sourceHeight: video.videoHeight
+                        });
+
                         cameraReady = true;
                         updateReadyStatus();
                     };
                 })
                 .catch(err => {
                     document.getElementById('msg').innerHTML = "ERROR: Camera access denied. Check permissions.";
+                    console.error('Camera Error:', err);
                 });
         }
         

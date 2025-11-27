@@ -61,7 +61,7 @@
     <video id="ar-video-source" autoplay playsinline></video>
 
     <div id="initial-screen">
-        <h2>Initiating Camera & GPS j2 </h2>
+        <h2>Initiating Camera & GPS j3 </h2>
         <p id="msg">Awaiting secure camera and high-accuracy lock...</p>
         <button id="start-btn" onclick="startAR()">LOAD BOUNDARIES</button>
     </div>
@@ -327,16 +327,20 @@
         }
 
         function startAR() {
-            const generator = document.createElement('a-entity');
-            generator.setAttribute('boundary-walls', '');
-            document.querySelector('#ar-content-placeholder').appendChild(generator);
+    // Manually add the component to trigger the drawing
+    const generator = document.createElement('a-entity');
+    generator.setAttribute('boundary-walls', '');
+    document.querySelector('#ar-content-placeholder').appendChild(generator);
 
-            // FIX 1B: Ensure A-Frame canvas background is completely transparent
-            const arCanvas = document.querySelector('canvas.a-canvas');
-            if (arCanvas) {
-                arCanvas.style.backgroundColor = 'transparent';
-            }
-        }
+    // FIX 1: HIDE INITIAL SCREEN IMMEDIATELY UPON CLICK
+    document.getElementById('initial-screen').style.display = 'none'; // ADD THIS LINE
+
+    // Ensure A-Frame canvas background is completely transparent
+    const arCanvas = document.querySelector('canvas.a-canvas');
+    if (arCanvas) {
+        arCanvas.style.backgroundColor = 'transparent';
+    }
+}
 
         window.onload = () => {
             initCamera(); 

@@ -54,7 +54,7 @@
     <video id="ar-video-source" autoplay playsinline></video>
 
     <div id="initial-screen">
-        <h2>Initiating Camera & GPS For Jerry</h2>
+        <h2>Initiating Camera & GPS Jerry2</h2>
         <p id="msg">Awaiting secure camera and high-accuracy lock...</p>
         <button id="start-btn" onclick="startAR()">LOAD BOUNDARIES</button>
     </div>
@@ -87,9 +87,7 @@
 
     <a-scene
         vr-mode-ui="enabled: false"
-        renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"> 
-        
-        <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; debugUIEnabled: false;">
+        renderer="antialias: true; alpha: true;"> <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; debugUIEnabled: false;">
             <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
         </a-entity>
         
@@ -124,7 +122,6 @@
             if (saved) {
                 offsetState = JSON.parse(saved);
             }
-            // Apply loaded or default settings
             applyTransforms(); 
         }
 
@@ -155,18 +152,16 @@
         // --- AR GENERATOR COMPONENT ---
         AFRAME.registerComponent('boundary-walls', {
             init: function() {
-                loadSettings(); // Load persisted offsets
+                loadSettings(); 
 
                 const anchor = boundaryPoints[0];
                 
-                // 1. Create the GPS Anchor (The "Root")
                 const root = document.createElement('a-entity');
                 root.setAttribute('gps-new-entity-place', {
                     latitude: anchor.lat,
                     longitude: anchor.lon
                 });
                 
-                // 2. Create the calibration container (This is what we move with buttons)
                 shapeContainer = document.createElement('a-entity');
                 shapeContainer.setAttribute('id', 'calibration-rig');
                 root.appendChild(shapeContainer);
@@ -177,7 +172,7 @@
                 marker.setAttribute('height', '50'); 
                 marker.setAttribute('radius', '1');
                 marker.setAttribute('position', '0 25 0'); 
-                shapeContainer.appendChild(marker); // Attach marker to container
+                shapeContainer.appendChild(marker); 
 
                 // Walls (High Visibility)
                 for (let i = 0; i < boundaryPoints.length - 1; i++) {
@@ -201,7 +196,6 @@
                     wall.setAttribute('color', 'yellow');
                     wall.setAttribute('opacity', '0.5');
                     wall.setAttribute('position', `${midX} 10 ${midZ}`);
-                    // Apply the rotation fix we found: add 90 degrees to align Z-up world with X-right geometry
                     wall.setAttribute('rotation', `0 ${angleDeg + 90} 0`); 
                     
                     shapeContainer.appendChild(wall);
@@ -209,10 +203,8 @@
 
                 document.querySelector('#ar-content-placeholder').appendChild(root);
                 
-                // Apply loaded transforms after drawing
                 applyTransforms();
                 
-                // Show controls
                 document.getElementById('top-menu').style.display = 'flex';
                 document.getElementById('ui-layer').style.display = 'flex';
                 
@@ -231,7 +223,6 @@
         }
 
         function resetLive() {
-            // Only resets current session view, doesn't delete storage
             offsetState.x = 0; offsetState.z = 0;
             offsetState.rot = 0;
             applyTransforms();
@@ -240,14 +231,12 @@
         function applyTransforms() {
             if (!shapeContainer) return;
             
-            // Apply Position (X/Z offset, Y is always 0 relative to GPS anchor)
             shapeContainer.setAttribute('position', {
                 x: offsetState.x,
                 y: 0,
                 z: offsetState.z
             });
 
-            // Apply Rotation (around the Y-axis)
             shapeContainer.setAttribute('rotation', {
                 x: 0,
                 y: offsetState.rot,
@@ -259,7 +248,6 @@
 
         function toggleHeight() {
              if (!shapeContainer) return;
-             // Toggle between 0.5m (low) and 1.6m (eye level)
              currentHeight = (currentHeight < 1.0) ? 1.6 : 0.5;
              const children = shapeContainer.querySelectorAll('a-box');
              children.forEach(child => {
@@ -290,10 +278,11 @@
                     video.onloadedmetadata = () => {
                         video.play();
                         
-                        // Set AR.js source parameters using the detected video resolution
                         const sceneEl = document.querySelector('a-scene');
+                        
+                        // *** CRITICAL FIX: videoTexture is set to TRUE here for brightness ***
                         sceneEl.querySelector('[arjs]').setAttribute('arjs', 
-                            `sourceType: video; sourceUrl: #ar-video-source; videoTexture: false; debugUIEnabled: false; display: look-at;`);
+                            `sourceType: video; sourceUrl: #ar-video-source; videoTexture: true; debugUIEnabled: false; display: look-at;`);
                         
                         // Set the correct resolution on the AR scene element itself
                         sceneEl.setAttribute('arjs', {
@@ -327,7 +316,6 @@
         }
 
         function startAR() {
-            // Manually add the component to trigger the drawing
             const generator = document.createElement('a-entity');
             generator.setAttribute('boundary-walls', '');
             document.querySelector('#ar-content-placeholder').appendChild(generator);

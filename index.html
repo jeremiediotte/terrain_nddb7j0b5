@@ -1,16 +1,23 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Final Fix</title>
+    <title>AR Manual Camera Fix</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://unpkg.com/aframe-ar-nft@6.0.0/dist/aframe-ar.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
+
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
         
+        /* The Manual Video Element (hidden behind the scene) */
+        #ar-video-source {
+            position: absolute;
+            z-index: -10; /* Keep it far behind the scene */
+        }
+
         #initial-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9); color: white;
@@ -27,11 +34,24 @@
 </head>
 
 <body>
+    <video id="ar-video-source" autoplay playsinline></video>
+
     <div id="initial-screen">
-        <h2>GPS Ready!</h2>
-        <p id="msg">Awaiting high-accuracy lock...</p>
+        <h2>Initiating Camera & GPS</h2>
+        <p id="msg">Awaiting secure camera and high-accuracy lock...</p>
         <button id="start-btn" onclick="startAR()">LOAD BOUNDARIES</button>
     </div>
+
+    <a-scene
+        vr-mode-ui="enabled: false"
+        renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"> 
+        
+        <a-entity arjs="sourceType: video; sourceUrl: #ar-video-source; videoTexture: true; debugUIEnabled: false;">
+            <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
+        </a-entity>
+        
+        <a-entity id="ar-content-placeholder"></a-entity>
+    </a-scene>
 
     <script>
         // --- CONFIGURATION DATA ---
@@ -48,6 +68,9 @@
           {lat: 45.36275270109053, lon: -71.06799299683564}
         ];
         
+        let cameraReady = false;
+        let gpsReady = false;
+
         // --- GEOMETRY HELPERS ---
         function getLocalPosition(anchor, point) {
             const dist = geolib.getDistance(anchor, point);
@@ -59,7 +82,6 @@
         // --- AR GENERATOR COMPONENT ---
         AFRAME.registerComponent('boundary-walls', {
             init: function() {
-                const scene = this.el.sceneEl;
                 const anchor = boundaryPoints[0];
 
                 const root = document.createElement('a-entity');
@@ -98,63 +120,73 @@
                     wall.setAttribute('color', 'yellow');
                     wall.setAttribute('opacity', '0.5');
                     wall.setAttribute('position', `${midX} 10 ${midZ}`);
-                    wall.setAttribute('rotation', `0 ${angleDeg} 0`);
+                    // Apply the rotation fix we discussed
+                    wall.setAttribute('rotation', `0 ${angleDeg + 90} 0`); 
                     
                     root.appendChild(wall);
                 }
 
-                scene.appendChild(root);
+                document.querySelector('#ar-content-placeholder').appendChild(root);
                 document.getElementById('msg').innerText = "Look around for the red tower!";
                 document.getElementById('initial-screen').style.display = 'none';
             }
         });
 
-        // --- MANUAL START LOGIC ---
+        // --- MANUAL CAMERA & GPS INITIALIZATION ---
+        function updateReadyStatus() {
+            if (cameraReady && gpsReady) {
+                 document.getElementById('msg').innerText = "All systems ready. Click below to view.";
+                 document.getElementById('start-btn').disabled = false;
+            }
+        }
+
+        function initCamera() {
+            const video = document.getElementById('ar-video-source');
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        cameraReady = true;
+                        updateReadyStatus();
+                    };
+                })
+                .catch(err => {
+                    document.getElementById('msg').innerHTML = "ERROR: Camera access denied or unavailable. Check permissions.";
+                    console.error('Camera Error:', err);
+                });
+        }
+        
         function checkGpsStatus(pos) {
-            // Check if accuracy is decent (e.g., < 20m)
             if (pos.coords.accuracy < 20) {
-                document.getElementById('msg').innerText = 
-                    `High-accuracy lock achieved (±${Math.round(pos.coords.accuracy)}m). Ready to load.`;
-                document.getElementById('start-btn').disabled = false;
+                gpsReady = true;
+                updateReadyStatus();
             } else {
-                 document.getElementById('msg').innerText = 
-                    `GPS Accuracy: ±${Math.round(pos.coords.accuracy)}m. Waiting for a better lock.`;
+                 document.getElementById('msg').innerText = `GPS Accuracy: ±${Math.round(pos.coords.accuracy)}m. Waiting...`;
             }
         }
         
-        function startAR() {
-            // Manually add the component to trigger the drawing
-            const scene = document.querySelector('a-scene');
-            const generator = document.createElement('a-entity');
-            generator.setAttribute('boundary-walls', '');
-            scene.appendChild(generator);
-        }
-
-        // Start GPS listener immediately (just like your test file)
-        function initApp() {
-            document.getElementById('start-btn').disabled = true;
-            if (navigator.geolocation) {
+        function initGps() {
+             if (navigator.geolocation) {
                  navigator.geolocation.watchPosition(
                     checkGpsStatus,
-                    (err) => { 
-                        document.getElementById('msg').innerText = "Error accessing location. Check permissions.";
-                    },
+                    (err) => { document.getElementById('msg').innerHTML = "GPS Error. Check Location Services."; },
                     { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                 );
             }
         }
 
-        window.onload = initApp;
+        function startAR() {
+            // Manually add the component to trigger the drawing
+            const generator = document.createElement('a-entity');
+            generator.setAttribute('boundary-walls', '');
+            document.querySelector('a-scene').appendChild(generator);
+        }
+
+        window.onload = () => {
+            initCamera(); // Start camera request immediately
+            initGps();    // Start GPS request immediately
+        };
     </script>
-
-   <a-scene
-    vr-mode-ui="enabled: false"
-    renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"> 
-
-    <a-entity arjs-video></a-entity> 
-    
-    <a-camera gps-new-camera='gpsMinDistance: 5' far="5000"></a-camera>
-    
-</a-scene>
 </body>
 </html>

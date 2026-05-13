@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Boundary Viewer</title>
+    <title>AR Boundary v2</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 
@@ -10,10 +10,10 @@
     <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
 
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; overflow: hidden; font-family: 'Courier New', monospace; background: #000; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { overflow: hidden; font-family: 'Courier New', monospace; background: #000; }
 
-        /* Camera video background */
+        /* Video camera background */
         #ar-video-source {
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%;
@@ -21,12 +21,14 @@
             z-index: 0;
         }
 
-        /* A-Frame canvas must sit on top of video */
+        /* A-Frame canvas transparent over video */
+        a-scene { 
+            position: fixed !important; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            z-index: 1; 
+        }
         canvas.a-canvas {
-            position: fixed !important;
-            top: 0 !important; left: 0 !important;
-            width: 100% !important; height: 100% !important;
-            z-index: 1 !important;
             background: transparent !important;
         }
 
@@ -38,41 +40,40 @@
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
             text-align: center; z-index: 9999;
-            padding: 20px;
+            padding: 24px;
         }
         #initial-screen h2 {
-            font-size: 22px; letter-spacing: 4px;
-            text-transform: uppercase; margin-bottom: 10px;
-            border-bottom: 1px solid #00ffcc44; padding-bottom: 10px;
+            font-size: 20px; letter-spacing: 4px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #00ffcc44;
+            padding-bottom: 12px; margin-bottom: 20px;
         }
+
         #status-list {
-            list-style: none; padding: 0; margin: 20px 0;
-            text-align: left; min-width: 260px;
+            list-style: none; text-align: left;
+            min-width: 280px; margin-bottom: 16px;
         }
         #status-list li {
-            padding: 6px 0; font-size: 14px;
+            padding: 8px 0; font-size: 13px;
             display: flex; align-items: center; gap: 10px;
             border-bottom: 1px solid #ffffff11;
         }
-        .status-icon { font-size: 18px; width: 24px; text-align: center; }
-        .status-ok   { color: #00ffcc; }
-        .status-wait { color: #888; animation: blink 1s infinite; }
-        .status-err  { color: #ff4444; }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .s-icon { font-size: 16px; width: 20px; text-align: center; }
+        .s-ok   { color: #00ffcc; }
+        .s-wait { color: #888; animation: blink 1s infinite; }
+        .s-err  { color: #ff4444; }
+        @keyframes blink { 0%,100%{opacity:1}50%{opacity:.2} }
 
-        #accuracy-bar-wrap {
-            width: 260px; height: 6px; background: #333;
-            border-radius: 3px; margin: 8px 0 16px;
-        }
-        #accuracy-bar { height: 100%; width: 0; background: #00ffcc; border-radius: 3px; transition: width .4s, background .4s; }
+        #acc-wrap { width: 280px; height: 5px; background: #222; border-radius: 3px; margin-bottom: 20px; }
+        #acc-bar  { height: 100%; width: 0; border-radius: 3px; transition: width .4s, background .4s; background: #00ffcc; }
 
         #start-btn {
-            padding: 14px 36px; font-size: 16px; letter-spacing: 3px;
-            text-transform: uppercase;
+            padding: 14px 36px; font-size: 15px;
+            letter-spacing: 3px; text-transform: uppercase;
             background: transparent; color: #00ffcc;
             border: 2px solid #00ffcc; border-radius: 4px;
-            cursor: pointer; transition: all .2s;
-            font-family: 'Courier New', monospace;
+            cursor: pointer; font-family: 'Courier New', monospace;
+            transition: all .2s;
         }
         #start-btn:not(:disabled):hover { background: #00ffcc; color: #000; }
         #start-btn:disabled { opacity: .3; cursor: default; }
@@ -82,11 +83,11 @@
             position: fixed; top: 0; left: 0; right: 0; height: 50px;
             display: none; justify-content: space-between; align-items: center;
             padding: 0 12px;
-            background: linear-gradient(to bottom, rgba(0,0,0,.7), transparent);
+            background: linear-gradient(to bottom, rgba(0,0,0,.75), transparent);
             z-index: 1000;
         }
         .menu-btn {
-            background: rgba(0,0,0,.75); border: 1px solid #555;
+            background: rgba(0,0,0,.8); border: 1px solid #555;
             color: #fff; padding: 7px 14px; font-size: 12px;
             border-radius: 4px; cursor: pointer;
             text-transform: uppercase; letter-spacing: 1px;
@@ -96,467 +97,459 @@
         .clear-btn { border-color: #ff4444; color: #ff4444; }
 
         #coord-display {
-            background: rgba(0,0,0,.65); color: #00ffcc;
+            background: rgba(0,0,0,.7); color: #00ffcc;
             padding: 6px 12px; border-radius: 4px;
-            font-size: 12px; letter-spacing: 1px;
+            font-size: 11px; letter-spacing: 1px;
         }
 
-        /* ── GPS ACCURACY BADGE ── */
         #gps-badge {
-            position: fixed; top: 58px; left: 50%; transform: translateX(-50%);
+            position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
             background: rgba(0,0,0,.65); color: #aaa;
-            padding: 4px 12px; border-radius: 12px; font-size: 11px;
-            z-index: 1000; display: none; letter-spacing: 1px;
+            padding: 3px 12px; border-radius: 12px;
+            font-size: 11px; z-index: 1000;
+            display: none; letter-spacing: 1px;
+            white-space: nowrap;
         }
 
         /* ── BOTTOM CONTROLS ── */
         #ui-layer {
-            position: fixed; bottom: 24px; left: 0; right: 0;
+            position: fixed; bottom: 20px; left: 0; right: 0;
             display: none; flex-direction: column; align-items: center;
-            pointer-events: none; z-index: 1000; gap: 10px;
+            pointer-events: none; z-index: 1000; gap: 8px;
         }
-        .control-row { display: flex; gap: 12px; pointer-events: auto; }
+        .ctrl-row { display: flex; gap: 10px; pointer-events: auto; }
 
         .ctrl-btn {
-            width: 58px; height: 58px; border-radius: 50%;
-            background: rgba(0,0,0,.65);
+            width: 56px; height: 56px; border-radius: 50%;
+            background: rgba(0,0,0,.7);
             border: 2px solid #00ffcc; color: #00ffcc;
-            font-size: 22px; cursor: pointer;
+            font-size: 20px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
-            user-select: none; transition: background .15s, color .15s;
+            user-select: none; -webkit-tap-highlight-color: transparent;
+            transition: background .12s, color .12s;
             font-family: 'Courier New', monospace;
-            -webkit-tap-highlight-color: transparent;
         }
         .ctrl-btn:active { background: #00ffcc; color: #000; }
+        .ctrl-btn.reset  { border-color: #ff8800; color: #ff8800; width: 48px; height: 48px; }
+        .ctrl-btn.reset:active { background: #ff8800; color: #000; }
 
-        .ctrl-btn.reset-btn {
-            width: 50px; height: 50px; font-size: 18px;
-            border-color: #ff8800; color: #ff8800;
-        }
-        .ctrl-btn.reset-btn:active { background: #ff8800; color: #000; }
-
-        /* Step size selector */
-        #step-row {
-            display: flex; gap: 8px; pointer-events: auto;
-            margin-bottom: 4px;
-        }
+        #step-row { display: flex; gap: 8px; pointer-events: auto; }
         .step-btn {
-            padding: 5px 12px; border-radius: 12px;
-            background: rgba(0,0,0,.65); border: 1px solid #555;
-            color: #aaa; font-size: 12px; cursor: pointer;
-            font-family: 'Courier New', monospace;
-            transition: all .15s;
+            padding: 5px 13px; border-radius: 12px;
+            background: rgba(0,0,0,.7); border: 1px solid #444;
+            color: #888; font-size: 12px; cursor: pointer;
+            font-family: 'Courier New', monospace; transition: all .15s;
+            -webkit-tap-highlight-color: transparent;
         }
         .step-btn.active { border-color: #00ffcc; color: #00ffcc; }
     </style>
 </head>
-
 <body>
-    <!-- Camera feed -->
-    <video id="ar-video-source" autoplay playsinline muted></video>
 
-    <!-- Loading / permission screen -->
-    <div id="initial-screen">
-        <h2>⬡ AR Boundary Viewer</h2>
-        <ul id="status-list">
-            <li>
-                <span class="status-icon status-wait" id="cam-icon">◌</span>
-                <span id="cam-label">Caméra — en attente…</span>
-            </li>
-            <li>
-                <span class="status-icon status-wait" id="gps-icon">◌</span>
-                <span id="gps-label">GPS — en attente…</span>
-            </li>
-        </ul>
-        <div id="accuracy-bar-wrap"><div id="accuracy-bar"></div></div>
-        <button id="start-btn" onclick="startAR()" disabled>CHARGER LES BORNES</button>
+<!-- Camera feed -->
+<video id="ar-video-source" autoplay playsinline muted></video>
+
+<!-- Loading screen -->
+<div id="initial-screen">
+    <h2>⬡ AR Boundary v2</h2>
+    <ul id="status-list">
+        <li>
+            <span class="s-icon s-wait" id="cam-icon">◌</span>
+            <span id="cam-label">Caméra — en attente…</span>
+        </li>
+        <li>
+            <span class="s-icon s-wait" id="gps-icon">◌</span>
+            <span id="gps-label">GPS — en attente…</span>
+        </li>
+        <li>
+            <span class="s-icon s-wait" id="cmp-icon">◌</span>
+            <span id="cmp-label">Boussole — en attente…</span>
+        </li>
+    </ul>
+    <div id="acc-wrap"><div id="acc-bar"></div></div>
+    <button id="start-btn" onclick="startAR()" disabled>CHARGER LES BORNES</button>
+</div>
+
+<!-- HUD -->
+<div id="top-menu">
+    <button class="menu-btn clear-btn" onclick="clearSettings()">RESET</button>
+    <div id="coord-display">X:0.0 Z:0.0 R:0.0°</div>
+    <button class="menu-btn save-btn" onclick="saveSettings()">SAUVEGARDER</button>
+</div>
+<div id="gps-badge">GPS ±-- m</div>
+
+<!-- Controls -->
+<div id="ui-layer">
+    <div id="step-row">
+        <button class="step-btn active" onclick="setStep(0.5,this)">0.5m</button>
+        <button class="step-btn"        onclick="setStep(2.0,this)">2m</button>
+        <button class="step-btn"        onclick="setStep(10, this)">10m</button>
     </div>
-
-    <!-- HUD -->
-    <div id="top-menu">
-        <button class="menu-btn clear-btn" onclick="clearSettings()">RESET</button>
-        <div id="coord-display">X:0.0 Z:0.0 R:0.0°</div>
-        <button class="menu-btn save-btn" onclick="saveSettings()">SAUVEGARDER</button>
+    <div class="ctrl-row">
+        <button class="ctrl-btn" onclick="adjust('rot', stepSize)">↻</button>
+        <button class="ctrl-btn" onclick="adjust('z', -stepSize)">▲</button>
+        <button class="ctrl-btn" onclick="adjust('rot',-stepSize)">↺</button>
     </div>
-    <div id="gps-badge">GPS ±-- m</div>
-
-    <!-- Controls -->
-    <div id="ui-layer">
-        <div id="step-row">
-            <button class="step-btn active" onclick="setStep(0.2, this)">0.2m</button>
-            <button class="step-btn" onclick="setStep(1.0, this)">1m</button>
-            <button class="step-btn" onclick="setStep(5.0, this)">5m</button>
-        </div>
-        <div class="control-row">
-            <button class="ctrl-btn" onclick="adjust('rot', stepSize)">↻</button>
-            <button class="ctrl-btn" onclick="adjust('z', -stepSize)">▲</button>
-            <button class="ctrl-btn" onclick="adjust('rot', -stepSize)">↺</button>
-        </div>
-        <div class="control-row">
-            <button class="ctrl-btn" onclick="adjust('x', -stepSize)">◀</button>
-            <button class="ctrl-btn reset-btn" onclick="resetLive()">●</button>
-            <button class="ctrl-btn" onclick="adjust('x', stepSize)">▶</button>
-        </div>
-        <div class="control-row">
-            <button class="ctrl-btn" onclick="adjust('z', stepSize)">▼</button>
-        </div>
+    <div class="ctrl-row">
+        <button class="ctrl-btn" onclick="adjust('x',-stepSize)">◀</button>
+        <button class="ctrl-btn reset"  onclick="resetLive()">●</button>
+        <button class="ctrl-btn" onclick="adjust('x', stepSize)">▶</button>
     </div>
+    <div class="ctrl-row">
+        <button class="ctrl-btn" onclick="adjust('z', stepSize)">▼</button>
+    </div>
+</div>
 
-    <!-- A-Frame scene — transparent so the video shows through -->
-    <a-scene
-        vr-mode-ui="enabled: false"
-        embedded
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-        renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"
-        style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;background:transparent;">
+<!-- A-Frame — arjs uses webcam internally for orientation -->
+<a-scene
+    vr-mode-ui="enabled: false"
+    embedded
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+    renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;">
 
-        <a-light type="ambient" color="#ffffff" intensity="1.2"></a-light>
+    <a-light type="ambient" intensity="1.5"></a-light>
 
-        <a-camera
-            id="main-camera"
-            gps-new-camera="gpsMinDistance: 2; gpsTimeInterval: 1000"
-            look-controls-enabled="false"
-            far="10000">
-        </a-camera>
+    <!--
+        look-controls with magicWindowTrackingEnabled reads the phone
+        gyroscope/compass so objects stay in world-space when you turn.
+        rotation-reader is required by AR.js GPS to apply device heading.
+    -->
+    <a-camera
+        id="main-camera"
+        gps-new-camera="gpsMinDistance: 2; gpsTimeInterval: 1000"
+        look-controls="enabled: true; magicWindowTrackingEnabled: true; reverseMouseDrag: false"
+        rotation-reader
+        far="10000"
+        near="0.01">
+    </a-camera>
 
-        <!-- All GPS-anchored walls will be appended here -->
-        <a-entity id="ar-root"></a-entity>
-    </a-scene>
+    <!-- All GPS walls injected here -->
+    <a-entity id="ar-root"></a-entity>
 
-    <script>
-    // ─────────────────────────────────────────────
-    //  BOUNDARY COORDINATES  (fermées: dernier = premier)
-    // ─────────────────────────────────────────────
-    const boundaryPoints = [
-        {lat: 45.36275270109053, lon: -71.06799299683564},
-        {lat: 45.36293636564523, lon: -71.06796516797210},
-        {lat: 45.36464470163011, lon: -71.06799923635670},
-        {lat: 45.36464382495869, lon: -71.06574886446494},
-        {lat: 45.36409500535321, lon: -71.06574970802724},
-        {lat: 45.36409469181381, lon: -71.06497117171959},
-        {lat: 45.36354587220936, lon: -71.06497202328269},
-        {lat: 45.36354618574768, lon: -71.06575055158952},
-        {lat: 45.36275185642023, lon: -71.06575805095848},
-        {lat: 45.36275270109053, lon: -71.06799299683564}  // fermeture
-    ];
+</a-scene>
 
-    // ─────────────────────────────────────────────
-    //  STATE
-    // ─────────────────────────────────────────────
-    let offsetState = { x: 0, z: 0, rot: 0 };
-    let stepSize    = 0.2;
-    let cameraReady = false;
-    let gpsReady    = false;
-    let arStarted   = false;
-    let wallEntities = [];   // références aux <a-entity> wrapper de chaque mur
-    let cornerMarkers = [];
+<script>
+// ─────────────────────────────────────────────
+//  BOUNDARY POINTS
+// ─────────────────────────────────────────────
+const boundaryPoints = [
+    {lat: 45.36275270109053, lon: -71.06799299683564},
+    {lat: 45.36293636564523, lon: -71.06796516797210},
+    {lat: 45.36464470163011, lon: -71.06799923635670},
+    {lat: 45.36464382495869, lon: -71.06574886446494},
+    {lat: 45.36409500535321, lon: -71.06574970802724},
+    {lat: 45.36409469181381, lon: -71.06497117171959},
+    {lat: 45.36354587220936, lon: -71.06497202328269},
+    {lat: 45.36354618574768, lon: -71.06575055158952},
+    {lat: 45.36275185642023, lon: -71.06575805095848},
+    {lat: 45.36275270109053, lon: -71.06799299683564}  // fermeture
+];
 
-    // ─────────────────────────────────────────────
-    //  PERSISTENCE
-    // ─────────────────────────────────────────────
-    function loadSettings() {
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+let offsetState  = { x: 0, z: 0, rot: 0 };
+let stepSize     = 0.5;
+let cameraReady  = false;
+let gpsReady     = false;
+let compassReady = false;
+let arStarted    = false;
+let allWrappers  = [];
+
+// ─────────────────────────────────────────────
+//  PERSISTENCE
+// ─────────────────────────────────────────────
+function loadSettings() {
+    try {
+        const s = localStorage.getItem('arBoundaryCalib_v3');
+        if (s) offsetState = JSON.parse(s);
+    } catch(e) {}
+}
+function saveSettings() {
+    localStorage.setItem('arBoundaryCalib_v3', JSON.stringify(offsetState));
+    const d = document.getElementById('coord-display');
+    d.style.color = '#00ff88';
+    d.innerText = '✓ SAUVEGARDÉ';
+    setTimeout(() => { d.style.color = '#00ffcc'; updateDisplay(); }, 1800);
+}
+function clearSettings() {
+    if (!confirm('Réinitialiser la calibration?')) return;
+    localStorage.removeItem('arBoundaryCalib_v3');
+    offsetState = { x: 0, z: 0, rot: 0 };
+    applyOffsets();
+}
+
+// ─────────────────────────────────────────────
+//  BUILD SCENE
+// ─────────────────────────────────────────────
+function buildBoundary() {
+    const root = document.getElementById('ar-root');
+
+    // ── Murs ──
+    for (let i = 0; i < boundaryPoints.length - 1; i++) {
+        const p1 = boundaryPoints[i];
+        const p2 = boundaryPoints[i + 1];
+
+        const midLat = (p1.lat + p2.lat) / 2;
+        const midLon = (p1.lon + p2.lon) / 2;
+        const len     = geolib.getDistance(
+            {latitude: p1.lat, longitude: p1.lon},
+            {latitude: p2.lat, longitude: p2.lon}
+        );
+        const bearing = geolib.getRhumbLineBearing(
+            {latitude: p1.lat, longitude: p1.lon},
+            {latitude: p2.lat, longitude: p2.lon}
+        );
+
+        const wrapper = document.createElement('a-entity');
+        const gpsEnt  = document.createElement('a-entity');
+        gpsEnt.setAttribute('gps-new-entity-place', {
+            latitude:  midLat,
+            longitude: midLon
+        });
+
+        // Mur jaune semi-transparent
+        const wall = document.createElement('a-box');
+        wall.setAttribute('width',   '0.4');
+        wall.setAttribute('height',  '4');
+        wall.setAttribute('depth',   String(len));
+        wall.setAttribute('color',   '#ffdd00');
+        wall.setAttribute('opacity', '0.5');
+        wall.setAttribute('position','0 2 0');
+        wall.setAttribute('rotation',`0 ${bearing} 0`);
+
+        // Bande de sol orange
+        const base = document.createElement('a-box');
+        base.setAttribute('width',   '0.6');
+        base.setAttribute('height',  '0.15');
+        base.setAttribute('depth',   String(len + 0.3));
+        base.setAttribute('color',   '#ff6600');
+        base.setAttribute('opacity', '0.85');
+        base.setAttribute('position','0 0.07 0');
+        base.setAttribute('rotation',`0 ${bearing} 0`);
+
+        gpsEnt.appendChild(wall);
+        gpsEnt.appendChild(base);
+        wrapper.appendChild(gpsEnt);
+        root.appendChild(wrapper);
+        allWrappers.push(wrapper);
+    }
+
+    // ── Marqueurs de coins ──
+    for (let i = 0; i < boundaryPoints.length; i++) {
+        const p       = boundaryPoints[i];
+        const isFirst = i === 0;
+
+        const wrapper = document.createElement('a-entity');
+        const gpsEnt  = document.createElement('a-entity');
+        gpsEnt.setAttribute('gps-new-entity-place', {
+            latitude:  p.lat,
+            longitude: p.lon
+        });
+
+        const cyl = document.createElement('a-cylinder');
+        cyl.setAttribute('color',   isFirst ? '#ff2222' : '#ff44aa');
+        cyl.setAttribute('height',  isFirst ? '8' : '3');
+        cyl.setAttribute('radius',  isFirst ? '0.5' : '0.25');
+        cyl.setAttribute('opacity', '0.95');
+        cyl.setAttribute('position','0 0 0');
+
+        const lbl = document.createElement('a-text');
+        lbl.setAttribute('value',    String(i + 1));
+        lbl.setAttribute('color',    '#ffffff');
+        lbl.setAttribute('align',    'center');
+        lbl.setAttribute('scale',    '5 5 5');
+        lbl.setAttribute('position', `0 ${isFirst ? 9 : 4.5} 0`);
+        lbl.setAttribute('look-at',  '#main-camera');
+
+        gpsEnt.appendChild(cyl);
+        gpsEnt.appendChild(lbl);
+        wrapper.appendChild(gpsEnt);
+        root.appendChild(wrapper);
+        allWrappers.push(wrapper);
+    }
+
+    applyOffsets();
+}
+
+// ─────────────────────────────────────────────
+//  OFFSET / CALIBRATION
+// ─────────────────────────────────────────────
+function applyOffsets() {
+    allWrappers.forEach(w => {
+        w.setAttribute('position', { x: offsetState.x, y: 0, z: offsetState.z });
+        w.setAttribute('rotation', { x: 0, y: offsetState.rot, z: 0 });
+    });
+    updateDisplay();
+}
+
+function adjust(axis, val) {
+    if (axis === 'x')   offsetState.x   += val;
+    if (axis === 'z')   offsetState.z   += val;
+    if (axis === 'rot') offsetState.rot += val;
+    applyOffsets();
+}
+
+function resetLive() {
+    offsetState = { x: 0, z: 0, rot: 0 };
+    applyOffsets();
+}
+
+function setStep(val, btn) {
+    stepSize = val;
+    document.querySelectorAll('.step-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+function updateDisplay() {
+    document.getElementById('coord-display').innerText =
+        `X:${offsetState.x.toFixed(1)} Z:${offsetState.z.toFixed(1)} R:${offsetState.rot.toFixed(1)}°`;
+}
+
+// ─────────────────────────────────────────────
+//  COMPASS PERMISSION  (iOS 13+)
+// ─────────────────────────────────────────────
+async function requestCompass() {
+    // Android — DeviceOrientation fonctionne sans permission
+    if (typeof DeviceOrientationEvent === 'undefined') {
+        setStatus('cmp', 'ok', '✓ Boussole (Android)');
+        compassReady = true;
+        checkAllReady();
+        return;
+    }
+
+    // iOS 13+ — il faut demander explicitement
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
-            const saved = localStorage.getItem('arBoundaryCalib_v2');
-            if (saved) offsetState = JSON.parse(saved);
-        } catch(e) {}
-    }
-
-    function saveSettings() {
-        localStorage.setItem('arBoundaryCalib_v2', JSON.stringify(offsetState));
-        const d = document.getElementById('coord-display');
-        d.style.color = '#00ff88';
-        d.innerText    = '✓ SAUVEGARDÉ';
-        setTimeout(() => { d.style.color = '#00ffcc'; updateDisplay(); }, 1800);
-    }
-
-    function clearSettings() {
-        if (!confirm('Réinitialiser la calibration?')) return;
-        localStorage.removeItem('arBoundaryCalib_v2');
-        offsetState = { x: 0, z: 0, rot: 0 };
-        applyOffsetToAll();
-    }
-
-    // ─────────────────────────────────────────────
-    //  GEOMETRY
-    // ─────────────────────────────────────────────
-    /**
-     * Bearing (degrés 0-360) entre deux points GPS.
-     * geolib.getRhumbLineBearing attend {latitude, longitude}
-     */
-    function getBearing(p1, p2) {
-        return geolib.getRhumbLineBearing(
-            { latitude: p1.lat, longitude: p1.lon },
-            { latitude: p2.lat, longitude: p2.lon }
-        );
-    }
-
-    function getDistance(p1, p2) {
-        return geolib.getDistance(
-            { latitude: p1.lat, longitude: p1.lon },
-            { latitude: p2.lat, longitude: p2.lon }
-        );
-    }
-
-    // ─────────────────────────────────────────────
-    //  BUILD AR SCENE
-    // ─────────────────────────────────────────────
-    function buildBoundary() {
-        const root = document.getElementById('ar-root');
-
-        // ── Murs : un gps-new-entity-place par segment ──
-        for (let i = 0; i < boundaryPoints.length - 1; i++) {
-            const p1 = boundaryPoints[i];
-            const p2 = boundaryPoints[i + 1];
-
-            // Milieu GPS du segment
-            const midLat = (p1.lat + p2.lat) / 2;
-            const midLon = (p1.lon + p2.lon) / 2;
-
-            // Longueur réelle (mètres)
-            const len = getDistance(p1, p2);
-
-            // Orientation réelle — AR.js fait correspondre Y=0 au Nord
-            const bearing = getBearing(p1, p2);
-
-            // Wrapper pour l'offset de calibration
-            const wrapper = document.createElement('a-entity');
-            wrapper.classList.add('wall-wrapper');
-
-            // Entité GPS
-            const gpsEntity = document.createElement('a-entity');
-            gpsEntity.setAttribute('gps-new-entity-place', {
-                latitude:  midLat,
-                longitude: midLon
-            });
-
-            // Mur visible
-            const wall = document.createElement('a-box');
-            wall.setAttribute('width',   '0.4');
-            wall.setAttribute('height',  '4');
-            wall.setAttribute('depth',   String(len));
-            wall.setAttribute('color',   '#ffdd00');
-            wall.setAttribute('opacity', '0.55');
-            wall.setAttribute('position','0 2 0');
-            // rotation Y : bearing vers A-Frame (Nord = 0°, Est = 90°)
-            wall.setAttribute('rotation', `0 ${bearing} 0`);
-
-            // Ligne de sol (plus visible depuis le sol)
-            const base = document.createElement('a-box');
-            base.setAttribute('width',   String(len + 0.2));
-            base.setAttribute('height',  '0.15');
-            base.setAttribute('depth',   '0.6');
-            base.setAttribute('color',   '#ff6600');
-            base.setAttribute('opacity', '0.8');
-            base.setAttribute('position','0 0.07 0');
-            base.setAttribute('rotation', `0 ${bearing} 0`);
-
-            gpsEntity.appendChild(wall);
-            gpsEntity.appendChild(base);
-            wrapper.appendChild(gpsEntity);
-            root.appendChild(wrapper);
-            wallEntities.push(wrapper);
+            const res = await DeviceOrientationEvent.requestPermission();
+            if (res === 'granted') {
+                setStatus('cmp', 'ok', '✓ Boussole accordée');
+                compassReady = true;
+            } else {
+                setStatus('cmp', 'err', '✗ Boussole refusée');
+            }
+        } catch(e) {
+            setStatus('cmp', 'err', '✗ Erreur boussole');
+            console.error(e);
         }
-
-        // ── Marqueurs de coins (cylindres rouges) ──
-        for (let i = 0; i < boundaryPoints.length; i++) {
-            const p = boundaryPoints[i];
-            const isFirst = (i === 0);
-
-            const wrapper = document.createElement('a-entity');
-            wrapper.classList.add('corner-wrapper');
-
-            const gpsEntity = document.createElement('a-entity');
-            gpsEntity.setAttribute('gps-new-entity-place', {
-                latitude:  p.lat,
-                longitude: p.lon
-            });
-
-            const marker = document.createElement('a-cylinder');
-            marker.setAttribute('color',  isFirst ? '#ff0000' : '#ff4488');
-            marker.setAttribute('height', isFirst ? '8' : '4');
-            marker.setAttribute('radius', isFirst ? '0.4' : '0.25');
-            marker.setAttribute('position','0 0 0');
-            marker.setAttribute('opacity', '0.9');
-
-            // Étiquette numéro de borne
-            const label = document.createElement('a-text');
-            label.setAttribute('value',    String(i + 1));
-            label.setAttribute('color',    '#ffffff');
-            label.setAttribute('align',    'center');
-            label.setAttribute('position', `0 ${isFirst ? 9 : 5} 0`);
-            label.setAttribute('scale',    '4 4 4');
-            label.setAttribute('look-at',  '#main-camera');
-
-            gpsEntity.appendChild(marker);
-            gpsEntity.appendChild(label);
-            wrapper.appendChild(gpsEntity);
-            root.appendChild(wrapper);
-            cornerMarkers.push(wrapper);
-        }
-
-        applyOffsetToAll();
-        showHUD();
+    } else {
+        // Pas de requestPermission = déjà autorisé (iOS < 13 ou anciens Android)
+        setStatus('cmp', 'ok', '✓ Boussole disponible');
+        compassReady = true;
     }
+    checkAllReady();
+}
 
-    // ─────────────────────────────────────────────
-    //  OFFSET (calibration manuelle)
-    // ─────────────────────────────────────────────
-    /**
-     * On applique l'offset en déplaçant chaque wrapper localement.
-     * L'offset X/Z est en mètres, rotation Y en degrés.
-     * Note : déplacer la POSITION des entités GPS ne bouge pas le rendu GPS —
-     * on tourne/translate le wrapper parent qui est dans l'espace A-Frame local.
-     */
-    function applyOffsetToAll() {
-        const allWrappers = [...wallEntities, ...cornerMarkers];
-        allWrappers.forEach(wrapper => {
-            wrapper.setAttribute('position', {
-                x: offsetState.x,
-                y: 0,
-                z: offsetState.z
-            });
-            wrapper.setAttribute('rotation', {
-                x: 0,
-                y: offsetState.rot,
-                z: 0
-            });
-        });
-        updateDisplay();
+// ─────────────────────────────────────────────
+//  CAMERA
+// ─────────────────────────────────────────────
+function initCamera() {
+    const video = document.getElementById('ar-video-source');
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width:{ideal:1280}, height:{ideal:720} },
+        audio: false
+    })
+    .then(stream => {
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+            video.play();
+            setStatus('cam', 'ok', '✓ Caméra prête');
+            cameraReady = true;
+            checkAllReady();
+        };
+    })
+    .catch(err => {
+        setStatus('cam', 'err', '✗ Caméra refusée');
+        console.error(err);
+    });
+}
+
+// ─────────────────────────────────────────────
+//  GPS
+// ─────────────────────────────────────────────
+function initGps() {
+    if (!navigator.geolocation) {
+        setStatus('gps', 'err', '✗ GPS non disponible');
+        return;
     }
-
-    function adjust(axis, val) {
-        if (axis === 'x')   offsetState.x   += val;
-        if (axis === 'z')   offsetState.z   += val;
-        if (axis === 'rot') offsetState.rot += val;
-        applyOffsetToAll();
-    }
-
-    function resetLive() {
-        offsetState = { x: 0, z: 0, rot: 0 };
-        applyOffsetToAll();
-    }
-
-    function setStep(val, btn) {
-        stepSize = val;
-        document.querySelectorAll('.step-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-    }
-
-    function updateDisplay() {
-        document.getElementById('coord-display').innerText =
-            `X:${offsetState.x.toFixed(1)} Z:${offsetState.z.toFixed(1)} R:${offsetState.rot.toFixed(1)}°`;
-    }
-
-    function showHUD() {
-        document.getElementById('top-menu').style.display = 'flex';
-        document.getElementById('ui-layer').style.display = 'flex';
-        document.getElementById('gps-badge').style.display = 'block';
-    }
-
-    // ─────────────────────────────────────────────
-    //  CAMERA INIT (flux vidéo manuel)
-    // ─────────────────────────────────────────────
-    function initCamera() {
-        const video = document.getElementById('ar-video-source');
-        navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false
-        })
-        .then(stream => {
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                video.play();
-                setCamStatus('ok', '✓ Caméra prête');
-                cameraReady = true;
-                checkAllReady();
-            };
-        })
-        .catch(err => {
-            setCamStatus('err', '✗ Caméra refusée — vérifiez les permissions');
-            console.error('Camera error:', err);
-        });
-    }
-
-    function setCamStatus(state, text) {
-        const icon  = document.getElementById('cam-icon');
-        const label = document.getElementById('cam-label');
-        icon.className = `status-icon status-${state === 'ok' ? 'ok' : 'err'}`;
-        icon.innerText = state === 'ok' ? '✓' : '✗';
-        label.innerText = text;
-    }
-
-    // ─────────────────────────────────────────────
-    //  GPS INIT
-    // ─────────────────────────────────────────────
-    function initGps() {
-        if (!navigator.geolocation) {
-            setGpsStatus('err', '✗ GPS non disponible sur cet appareil');
-            return;
-        }
-        navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, {
-            enableHighAccuracy: true, timeout: 15000, maximumAge: 0
-        });
-    }
-
-    function onGpsUpdate(pos) {
+    navigator.geolocation.watchPosition(pos => {
         const acc = Math.round(pos.coords.accuracy);
         document.getElementById('gps-badge').innerText = `GPS ±${acc} m`;
-
-        // Barre de précision (vert < 5 m, orange < 20 m, rouge > 20 m)
-        const bar = document.getElementById('accuracy-bar');
         const pct = Math.max(0, Math.min(100, (1 - acc / 30) * 100));
-        bar.style.width    = pct + '%';
+        const bar = document.getElementById('acc-bar');
+        bar.style.width      = pct + '%';
         bar.style.background = acc < 5 ? '#00ffcc' : acc < 20 ? '#ffaa00' : '#ff4444';
 
-        if (acc <= 20 && !gpsReady) {
-            setGpsStatus('ok', `✓ GPS prêt (±${acc} m)`);
-            gpsReady = true;
-            checkAllReady();
-        } else if (!gpsReady) {
-            setGpsStatus('wait', `GPS en cours… ±${acc} m`);
+        if (!gpsReady) {
+            if (acc <= 20) {
+                setStatus('gps', 'ok', `✓ GPS prêt (±${acc} m)`);
+                gpsReady = true;
+                checkAllReady();
+            } else {
+                setStatus('gps', 'wait', `GPS en cours… ±${acc} m`);
+            }
         }
+    }, err => {
+        setStatus('gps', 'err', '✗ GPS — activez la localisation');
+        console.error(err);
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+function setStatus(key, state, text) {
+    const icon  = document.getElementById(`${key}-icon`);
+    const label = document.getElementById(`${key}-label`);
+    icon.className = `s-icon s-${state}`;
+    icon.innerText = state === 'ok' ? '✓' : state === 'err' ? '✗' : '◌';
+    label.innerText = text;
+}
+
+function checkAllReady() {
+    if (cameraReady && gpsReady && compassReady) {
+        document.getElementById('start-btn').disabled = false;
     }
+}
 
-    function onGpsError(err) {
-        setGpsStatus('err', '✗ Erreur GPS — activez la localisation');
-        console.error('GPS error:', err);
+// ─────────────────────────────────────────────
+//  START AR
+// ─────────────────────────────────────────────
+async function startAR() {
+    if (arStarted) return;
+
+    // Demander la boussole au moment du clic (geste utilisateur requis sur iOS)
+    await requestCompass();
+    if (!compassReady) return;  // arrêter si refusé
+
+    arStarted = true;
+    loadSettings();
+    buildBoundary();
+
+    document.getElementById('initial-screen').style.display = 'none';
+    document.getElementById('top-menu').style.display = 'flex';
+    document.getElementById('ui-layer').style.display  = 'flex';
+    document.getElementById('gps-badge').style.display = 'block';
+
+    updateDisplay();
+}
+
+// ─────────────────────────────────────────────
+//  BOOT
+// ─────────────────────────────────────────────
+window.addEventListener('load', () => {
+    initCamera();
+    initGps();
+
+    // Sur Android la boussole ne nécessite pas de permission —
+    // on marque compassReady directement si pas iOS
+    if (typeof DeviceOrientationEvent === 'undefined' ||
+        typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        setStatus('cmp', 'ok', '✓ Boussole disponible');
+        compassReady = true;
+        checkAllReady();
     }
-
-    function setGpsStatus(state, text) {
-        const icon  = document.getElementById('gps-icon');
-        const label = document.getElementById('gps-label');
-        const map   = { ok: 'ok', wait: 'wait', err: 'err' };
-        icon.className = `status-icon status-${map[state]}`;
-        icon.innerText = state === 'ok' ? '✓' : state === 'wait' ? '◌' : '✗';
-        label.innerText = text;
-    }
-
-    function checkAllReady() {
-        if (cameraReady && gpsReady) {
-            document.getElementById('start-btn').disabled = false;
-        }
-    }
-
-    // ─────────────────────────────────────────────
-    //  START
-    // ─────────────────────────────────────────────
-    function startAR() {
-        if (arStarted) return;
-        arStarted = true;
-
-        loadSettings();
-        buildBoundary();
-
-        document.getElementById('initial-screen').style.display = 'none';
-    }
-
-    // ─────────────────────────────────────────────
-    //  BOOT
-    // ─────────────────────────────────────────────
-    window.addEventListener('load', () => {
-        initCamera();
-        initGps();
-    });
-    </script>
+});
+</script>
 </body>
 </html>

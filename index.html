@@ -1,205 +1,177 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Boundary v3</title>
-    <meta charset="utf-8" />
+    <title>AR Boundary — Overlay</title>
+    <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-ar-nft@6.0.0/dist/aframe-ar.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.4/lib/index.min.js"></script>
-
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { overflow: hidden; font-family: 'Courier New', monospace; background: #000; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
 
-        #ar-video-source {
+        /* Caméra en fond */
+        #cam {
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%;
             object-fit: cover; z-index: 0;
         }
-        a-scene {
-            position: fixed !important;
-            top: 0; left: 0; width: 100%; height: 100%;
+
+        /* Canvas overlay AR par-dessus la caméra */
+        #overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
             z-index: 1;
+            pointer-events: none;
         }
-        canvas.a-canvas { background: transparent !important; }
 
         /* ── LOADING ── */
-        #initial-screen {
+        #screen-load {
             position: fixed; inset: 0; background: #000; color: #00ffcc;
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
             text-align: center; z-index: 9999; padding: 24px;
         }
-        #initial-screen h2 {
-            font-size: 20px; letter-spacing: 4px; text-transform: uppercase;
-            border-bottom: 1px solid #00ffcc44; padding-bottom: 12px; margin-bottom: 20px;
+        #screen-load h2 {
+            font-size: 19px; letter-spacing: 4px; text-transform: uppercase;
+            border-bottom: 1px solid #00ffcc33; padding-bottom: 12px; margin-bottom: 20px;
         }
-        #status-list { list-style: none; text-align: left; min-width: 280px; margin-bottom: 16px; }
-        #status-list li {
+        .sl { list-style: none; text-align: left; min-width: 270px; margin-bottom: 14px; }
+        .sl li {
             padding: 8px 0; font-size: 13px;
             display: flex; align-items: center; gap: 10px;
-            border-bottom: 1px solid #ffffff11;
+            border-bottom: 1px solid #ffffff0f;
         }
-        .s-icon { font-size: 16px; width: 20px; text-align: center; }
-        .s-ok   { color: #00ffcc; }
-        .s-wait { color: #888; animation: blink 1s infinite; }
-        .s-err  { color: #ff4444; }
-        @keyframes blink { 0%,100%{opacity:1}50%{opacity:.2} }
+        .ic { width: 18px; text-align: center; }
+        .ok   { color: #00ffcc; }
+        .wait { color: #666; animation: bl 1s infinite; }
+        .err  { color: #ff4444; }
+        @keyframes bl { 0%,100%{opacity:1}50%{opacity:.2} }
 
-        #acc-wrap { width: 280px; height: 5px; background: #222; border-radius: 3px; margin-bottom: 20px; }
+        #acc-wrap { width: 270px; height: 5px; background: #1a1a1a; border-radius: 3px; margin-bottom: 18px; }
         #acc-bar  { height: 100%; width: 0; border-radius: 3px; transition: width .4s, background .4s; }
 
-        #start-btn {
-            padding: 14px 36px; font-size: 15px; letter-spacing: 3px;
+        #btn-start {
+            padding: 13px 34px; font-size: 14px; letter-spacing: 3px;
             text-transform: uppercase; background: transparent; color: #00ffcc;
             border: 2px solid #00ffcc; border-radius: 4px; cursor: pointer;
             font-family: 'Courier New', monospace; transition: all .2s;
         }
-        #start-btn:not(:disabled):hover { background: #00ffcc; color: #000; }
-        #start-btn:disabled { opacity: .3; cursor: default; }
+        #btn-start:not(:disabled):hover,
+        #btn-start:not(:disabled):active { background: #00ffcc; color: #000; }
+        #btn-start:disabled { opacity: .25; cursor: default; }
 
         /* ── HUD ── */
-        #top-menu {
-            position: fixed; top: 0; left: 0; right: 0; height: 50px;
+        #hud-top {
+            position: fixed; top: 0; left: 0; right: 0;
             display: none; justify-content: space-between; align-items: center;
-            padding: 0 12px;
-            background: linear-gradient(to bottom, rgba(0,0,0,.75), transparent);
-            z-index: 1000;
+            padding: 8px 12px;
+            background: linear-gradient(to bottom, rgba(0,0,0,.8) 0%, transparent 100%);
+            z-index: 10;
         }
-        .menu-btn {
-            background: rgba(0,0,0,.8); border: 1px solid #555; color: #fff;
-            padding: 7px 14px; font-size: 12px; border-radius: 4px; cursor: pointer;
-            text-transform: uppercase; letter-spacing: 1px;
-            font-family: 'Courier New', monospace;
+        .hbtn {
+            background: rgba(0,0,0,.75); border: 1px solid #444; color: #ccc;
+            padding: 6px 13px; font-size: 11px; border-radius: 4px; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 1px; font-family: 'Courier New', monospace;
         }
-        .save-btn  { border-color: #00ffcc; color: #00ffcc; }
-        .clear-btn { border-color: #ff4444; color: #ff4444; }
-        #coord-display {
+        .hbtn.save  { border-color: #00ffcc; color: #00ffcc; }
+        .hbtn.reset { border-color: #ff5555; color: #ff5555; }
+        #hud-info {
             background: rgba(0,0,0,.7); color: #00ffcc;
-            padding: 6px 12px; border-radius: 4px; font-size: 11px; letter-spacing: 1px;
+            padding: 5px 11px; border-radius: 4px; font-size: 11px; letter-spacing: 1px;
+            text-align: center; line-height: 1.5;
         }
-        #gps-badge {
-            position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,.65); color: #aaa;
-            padding: 3px 12px; border-radius: 12px; font-size: 11px;
-            z-index: 1000; display: none; letter-spacing: 1px; white-space: nowrap;
+
+        /* ── DEBUG / STATUS BAR ── */
+        #status-bar {
+            position: fixed; bottom: 130px; left: 10px; right: 10px;
+            background: rgba(0,0,0,.6); color: #aaa;
+            padding: 6px 10px; border-radius: 6px; font-size: 11px;
+            z-index: 10; display: none; text-align: center; letter-spacing: .5px;
         }
 
         /* ── CONTROLS ── */
-        #ui-layer {
-            position: fixed; bottom: 20px; left: 0; right: 0;
+        #controls {
+            position: fixed; bottom: 16px; left: 0; right: 0;
             display: none; flex-direction: column; align-items: center;
-            pointer-events: none; z-index: 1000; gap: 8px;
+            z-index: 10; gap: 7px;
         }
-        .ctrl-row { display: flex; gap: 10px; pointer-events: auto; }
-        .ctrl-btn {
-            width: 56px; height: 56px; border-radius: 50%;
-            background: rgba(0,0,0,.7); border: 2px solid #00ffcc; color: #00ffcc;
-            font-size: 20px; cursor: pointer;
+        .crow { display: flex; gap: 9px; }
+        .cb {
+            width: 54px; height: 54px; border-radius: 50%;
+            background: rgba(0,0,0,.75); border: 2px solid #00ffcc; color: #00ffcc;
+            font-size: 19px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             user-select: none; -webkit-tap-highlight-color: transparent;
-            transition: background .12s, color .12s;
-            font-family: 'Courier New', monospace;
+            transition: background .1s, color .1s;
         }
-        .ctrl-btn:active { background: #00ffcc; color: #000; }
-        .ctrl-btn.reset  { border-color: #ff8800; color: #ff8800; width: 48px; height: 48px; }
-        .ctrl-btn.reset:active { background: #ff8800; color: #000; }
-        #step-row { display: flex; gap: 8px; pointer-events: auto; }
-        .step-btn {
-            padding: 5px 13px; border-radius: 12px;
-            background: rgba(0,0,0,.7); border: 1px solid #444; color: #888;
-            font-size: 12px; cursor: pointer; font-family: 'Courier New', monospace;
-            transition: all .15s; -webkit-tap-highlight-color: transparent;
+        .cb:active { background: #00ffcc; color: #000; }
+        .cb.sm { width: 46px; height: 46px; font-size: 16px; }
+        .cb.org { border-color: #ff8800; color: #ff8800; }
+        .cb.org:active { background: #ff8800; color: #000; }
+
+        #step-row { display: flex; gap: 7px; }
+        .sb {
+            padding: 4px 12px; border-radius: 10px;
+            background: rgba(0,0,0,.75); border: 1px solid #444; color: #777;
+            font-size: 11px; cursor: pointer; font-family: 'Courier New', monospace;
+            -webkit-tap-highlight-color: transparent; transition: all .15s;
         }
-        .step-btn.active { border-color: #00ffcc; color: #00ffcc; }
+        .sb.on { border-color: #00ffcc; color: #00ffcc; }
     </style>
 </head>
 <body>
 
-<video id="ar-video-source" autoplay playsinline muted></video>
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="overlay"></canvas>
 
-<div id="initial-screen">
-    <h2>⬡ AR Boundary v3</h2>
-    <ul id="status-list">
-        <li><span class="s-icon s-wait" id="cam-icon">◌</span><span id="cam-label">Caméra — en attente…</span></li>
-        <li><span class="s-icon s-wait" id="gps-icon">◌</span><span id="gps-label">GPS — en attente…</span></li>
-        <li><span class="s-icon s-wait" id="cmp-icon">◌</span><span id="cmp-label">Boussole — en attente…</span></li>
+<!-- Loading -->
+<div id="screen-load">
+    <h2>⬡ AR Boundary</h2>
+    <ul class="sl">
+        <li><span class="ic wait" id="i-cam">◌</span><span id="l-cam">Caméra — en attente…</span></li>
+        <li><span class="ic wait" id="i-gps">◌</span><span id="l-gps">GPS — en attente…</span></li>
+        <li><span class="ic wait" id="i-cmp">◌</span><span id="l-cmp">Boussole — en attente…</span></li>
     </ul>
     <div id="acc-wrap"><div id="acc-bar"></div></div>
-    <button id="start-btn" onclick="startAR()" disabled>CHARGER LES BORNES</button>
+    <button id="btn-start" onclick="startAR()" disabled>CHARGER LES BORNES</button>
 </div>
 
-<div id="top-menu">
-    <button class="menu-btn clear-btn" onclick="clearSettings()">RESET</button>
-    <div id="coord-display">X:0.0 Z:0.0 R:0.0°</div>
-    <button class="menu-btn save-btn" onclick="saveSettings()">SAUVEGARDER</button>
+<!-- HUD -->
+<div id="hud-top">
+    <button class="hbtn reset" onclick="clearCalib()">RESET</button>
+    <div id="hud-info">— —</div>
+    <button class="hbtn save"  onclick="saveCalib()">SAUVEGARDER</button>
 </div>
-<div id="gps-badge">GPS ±-- m</div>
+<div id="status-bar"></div>
 
-<div id="ui-layer">
+<!-- Controls -->
+<div id="controls">
     <div id="step-row">
-        <button class="step-btn active" onclick="setStep(0.5,this)">0.5m</button>
-        <button class="step-btn"        onclick="setStep(2.0,this)">2m</button>
-        <button class="step-btn"        onclick="setStep(10, this)">10m</button>
+        <button class="sb on"  onclick="setStep(1,  this)">1°/1m</button>
+        <button class="sb"     onclick="setStep(5,  this)">5°/5m</button>
+        <button class="sb"     onclick="setStep(15, this)">15°</button>
     </div>
-    <div class="ctrl-row">
-        <button class="ctrl-btn" onclick="adjust('rot', stepSize)">↻</button>
-        <button class="ctrl-btn" onclick="adjust('z', -stepSize)">▲</button>
-        <button class="ctrl-btn" onclick="adjust('rot',-stepSize)">↺</button>
+    <div class="crow">
+        <button class="cb" onclick="adj('rot',-step)">↺</button>
+        <button class="cb" onclick="adj('y',-step)">▲</button>
+        <button class="cb" onclick="adj('rot', step)">↻</button>
     </div>
-    <div class="ctrl-row">
-        <button class="ctrl-btn" onclick="adjust('x',-stepSize)">◀</button>
-        <button class="ctrl-btn reset"  onclick="resetLive()">●</button>
-        <button class="ctrl-btn" onclick="adjust('x', stepSize)">▶</button>
+    <div class="crow">
+        <button class="cb" onclick="adj('x',-step)">◀</button>
+        <button class="cb sm org" onclick="resetCalib()">●</button>
+        <button class="cb" onclick="adj('x', step)">▶</button>
     </div>
-    <div class="ctrl-row">
-        <button class="ctrl-btn" onclick="adjust('z', stepSize)">▼</button>
+    <div class="crow">
+        <button class="cb" onclick="adj('y', step)">▼</button>
     </div>
 </div>
-
-<a-scene
-    vr-mode-ui="enabled: false"
-    embedded
-    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-    renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;">
-
-    <a-light type="ambient" intensity="1.5"></a-light>
-
-    <a-camera
-        id="main-camera"
-        gps-new-camera="gpsMinDistance: 2; gpsTimeInterval: 1000"
-        look-controls="enabled: true; magicWindowTrackingEnabled: true"
-        rotation-reader
-        far="10000"
-        near="0.01">
-    </a-camera>
-
-    <!--
-        UNE SEULE ancre GPS = le point 0 du terrain.
-        Tout le reste est en coordonnées locales X/Z calculées
-        par rapport à cette ancre, en mètres.
-    -->
-    <a-entity id="gps-anchor"
-        gps-new-entity-place="latitude: 45.36275270109053; longitude: -71.06799299683564">
-
-        <!-- Le "rig" de calibration : on bouge juste ce container -->
-        <a-entity id="calib-rig">
-            <!-- Les murs et marqueurs seront injectés ici -->
-        </a-entity>
-
-    </a-entity>
-
-</a-scene>
 
 <script>
-// ─────────────────────────────────────────────
-//  TERRAIN — point 0 = ancre GPS
-// ─────────────────────────────────────────────
-const ANCHOR = { lat: 45.36275270109053, lon: -71.06799299683564 };
-
-const boundaryPoints = [
+// ═══════════════════════════════════════════════════════
+//  TERRAIN
+//  Tous les points de borne, dans l'ordre, fermés.
+// ═══════════════════════════════════════════════════════
+const BOUNDARY = [
     {lat: 45.36275270109053, lon: -71.06799299683564},
     {lat: 45.36293636564523, lon: -71.06796516797210},
     {lat: 45.36464470163011, lon: -71.06799923635670},
@@ -212,295 +184,444 @@ const boundaryPoints = [
     {lat: 45.36275270109053, lon: -71.06799299683564}  // fermeture
 ];
 
-// ─────────────────────────────────────────────
-//  CONVERSION GPS → X/Z local (mètres)
-//  Par rapport à ANCHOR, dans le repère A-Frame :
-//    X = Est/Ouest   (Est = +X)
-//    Z = Nord/Sud    (Nord = -Z  dans A-Frame)
-// ─────────────────────────────────────────────
-function toLocal(point) {
-    const dist    = geolib.getDistance(
-        { latitude: ANCHOR.lat, longitude: ANCHOR.lon },
-        { latitude: point.lat,  longitude: point.lon  }
-    );
-    const bearing = geolib.getRhumbLineBearing(
-        { latitude: ANCHOR.lat, longitude: ANCHOR.lon },
-        { latitude: point.lat,  longitude: point.lon  }
-    );
-    // bearing 0° = Nord, 90° = Est
-    // A-Frame : Nord = -Z, Est = +X
-    const rad = bearing * Math.PI / 180;
-    return {
-        x:  dist * Math.sin(rad),   // Est  = +X
-        z: -dist * Math.cos(rad)    // Nord = -Z
-    };
+// ═══════════════════════════════════════════════════════
+//  ÉTAT
+// ═══════════════════════════════════════════════════════
+let myLat = null, myLon = null;
+let heading = 0;          // cap boussole en degrés (0=Nord, 90=Est)
+let headingRaw = 0;
+let step = 1;
+
+// Calibration : offset en degrés de rotation + translation en mètres N/E
+let calib = { rot: 0, x: 0, y: 0 };  // y = Nord/Sud,  x = Est/Ouest
+
+let camReady = false, gpsReady = false, cmpReady = false;
+let running  = false;
+let animId   = null;
+
+// ═══════════════════════════════════════════════════════
+//  MATHS GPS
+// ═══════════════════════════════════════════════════════
+const DEG2RAD = Math.PI / 180;
+const EARTH_R  = 6371000; // mètres
+
+// Retourne {dist (m), bearing (°)} depuis (lat1,lon1) vers (lat2,lon2)
+function gpsVector(lat1, lon1, lat2, lon2) {
+    const dLat = (lat2 - lat1) * DEG2RAD;
+    const dLon = (lon2 - lon1) * DEG2RAD;
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(lat1*DEG2RAD) * Math.cos(lat2*DEG2RAD) * Math.sin(dLon/2)**2;
+    const dist = 2 * EARTH_R * Math.asin(Math.sqrt(a));
+
+    const y = Math.sin(dLon*DEG2RAD) * Math.cos(lat2*DEG2RAD);
+    const x = Math.cos(lat1*DEG2RAD) * Math.sin(lat2*DEG2RAD)
+            - Math.sin(lat1*DEG2RAD) * Math.cos(lat2*DEG2RAD) * Math.cos(dLon*DEG2RAD);
+    const bearing = (Math.atan2(y, x) / DEG2RAD + 360) % 360;
+    return { dist, bearing };
 }
 
-// ─────────────────────────────────────────────
-//  STATE
-// ─────────────────────────────────────────────
-let offsetState  = { x: 0, z: 0, rot: 0 };
-let stepSize     = 0.5;
-let cameraReady  = false;
-let gpsReady     = false;
-let compassReady = false;
-let arStarted    = false;
-let calibRig     = null;
+// ═══════════════════════════════════════════════════════
+//  PROJECTION
+//  Convertit un point du terrain en coordonnées écran (px, py).
+//
+//  Principe :
+//    1. Calcule l'angle horizontal entre le cap de la boussole
+//       et la direction vers ce point (bearing relatif).
+//    2. Mappe cet angle sur la largeur de l'écran via un FOV horizontal.
+//    3. La distance donne la "profondeur" → perspective sur Y.
+// ═══════════════════════════════════════════════════════
+const H_FOV = 70; // degrés — champ de vue horizontal de la caméra
 
-// ─────────────────────────────────────────────
-//  PERSISTENCE
-// ─────────────────────────────────────────────
-function loadSettings() {
-    try {
-        const s = localStorage.getItem('arBoundaryCalib_v3');
-        if (s) offsetState = JSON.parse(s);
-    } catch(e) {}
+function projectPoint(lat, lon, W, H) {
+    const { dist, bearing } = gpsVector(myLat, myLon, lat, lon);
+
+    // Angle relatif par rapport au cap actuel (+ calibration rotation)
+    let relAngle = bearing - heading - calib.rot;
+    // Normaliser dans [-180, 180]
+    relAngle = ((relAngle + 540) % 360) - 180;
+
+    // Hors champ → null (avec marge pour les segments qui croisent le bord)
+    if (Math.abs(relAngle) > H_FOV * 1.5) return null;
+
+    // Position X : centre = W/2, ±H_FOV/2 = bords
+    const px = W / 2 + (relAngle / (H_FOV / 2)) * (W / 2);
+
+    // Position Y : plus c'est loin, plus c'est haut (horizon)
+    // Formule perspective simple : py = H/2 + H/2 * (1 - minDist/dist)^0.4
+    const minDist = 1;
+    const d = Math.max(dist, minDist);
+    const py = H * 0.55 - (H * 0.38) * Math.pow(Math.min(1, 10 / d), 0.35);
+
+    return { px, py, dist, relAngle };
 }
-function saveSettings() {
-    localStorage.setItem('arBoundaryCalib_v3', JSON.stringify(offsetState));
-    const d = document.getElementById('coord-display');
-    d.style.color = '#00ff88'; d.innerText = '✓ SAUVEGARDÉ';
-    setTimeout(() => { d.style.color = '#00ffcc'; updateDisplay(); }, 1800);
-}
-function clearSettings() {
-    if (!confirm('Réinitialiser la calibration?')) return;
-    localStorage.removeItem('arBoundaryCalib_v3');
-    offsetState = { x: 0, z: 0, rot: 0 };
-    applyCalib();
-}
 
-// ─────────────────────────────────────────────
-//  BUILD — tout en coordonnées locales X/Z
-// ─────────────────────────────────────────────
-function buildBoundary() {
-    calibRig = document.getElementById('calib-rig');
+// ═══════════════════════════════════════════════════════
+//  DRAW LOOP
+// ═══════════════════════════════════════════════════════
+function draw() {
+    const canvas = document.getElementById('overlay');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width  = window.innerWidth;
+    const H = canvas.height = window.innerHeight;
 
-    // ── Murs ──
-    for (let i = 0; i < boundaryPoints.length - 1; i++) {
-        const p1 = boundaryPoints[i];
-        const p2 = boundaryPoints[i + 1];
+    ctx.clearRect(0, 0, W, H);
 
-        const lp1 = toLocal(p1);
-        const lp2 = toLocal(p2);
+    if (myLat === null) {
+        animId = requestAnimationFrame(draw);
+        return;
+    }
 
-        // Centre du segment en X/Z
-        const midX = (lp1.x + lp2.x) / 2;
-        const midZ = (lp1.z + lp2.z) / 2;
+    // Projeter tous les points
+    const pts = BOUNDARY.map(p => {
+        // Appliquer calibration translation (calib.x = Est m, calib.y = Nord m)
+        const mPerLat = 111320;
+        const mPerLon = 111320 * Math.cos(myLat * DEG2RAD);
+        const adjLat  = p.lat + calib.y / mPerLat;
+        const adjLon  = p.lon + calib.x / mPerLon;
+        return projectPoint(adjLat, adjLon, W, H);
+    });
 
-        // Longueur du segment
-        const dx  = lp2.x - lp1.x;
-        const dz  = lp2.z - lp1.z;
-        const len = Math.sqrt(dx * dx + dz * dz);
+    // ── Dessiner les segments ──
+    for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
 
-        // Angle dans l'espace A-Frame (atan2 donne l'angle par rapport à +Z)
-        const angleY = Math.atan2(dx, dz) * (180 / Math.PI);
+        // Si les deux points sont null, on saute
+        if (!a && !b) continue;
 
-        // Mur jaune
-        const wall = document.createElement('a-box');
-        wall.setAttribute('position', `${midX} 2 ${midZ}`);
-        wall.setAttribute('rotation', `0 ${angleY} 0`);
-        wall.setAttribute('width',    '0.4');
-        wall.setAttribute('height',   '4');
-        wall.setAttribute('depth',    String(len));
-        wall.setAttribute('color',    '#ffdd00');
-        wall.setAttribute('opacity',  '0.55');
-        wall.setAttribute('material', 'side: double');
-        calibRig.appendChild(wall);
+        // Interpolation si un seul côté est visible
+        const pa = a || interpolateEdge(pts[i === 0 ? pts.length-2 : i-1], b, W, H);
+        const pb = b || interpolateEdge(a, pts[i + 2] || pts[1], W, H);
+        if (!pa || !pb) continue;
 
-        // Bande de sol orange
-        const base = document.createElement('a-box');
-        base.setAttribute('position', `${midX} 0.08 ${midZ}`);
-        base.setAttribute('rotation', `0 ${angleY} 0`);
-        base.setAttribute('width',    '0.7');
-        base.setAttribute('height',   '0.15');
-        base.setAttribute('depth',    String(len + 0.3));
-        base.setAttribute('color',    '#ff6600');
-        base.setAttribute('opacity',  '0.9');
-        calibRig.appendChild(base);
+        const avgDist = ((a?.dist ?? 999) + (b?.dist ?? 999)) / 2;
+
+        // Épaisseur et opacité selon distance
+        const thickness = Math.max(1.5, Math.min(8, 120 / avgDist));
+        const alpha     = Math.max(0.3, Math.min(0.95, 1 - avgDist / 500));
+
+        // Ligne principale jaune
+        ctx.beginPath();
+        ctx.moveTo(pa.px, pa.py);
+        ctx.lineTo(pb.px, pb.py);
+        ctx.strokeStyle = `rgba(255, 220, 0, ${alpha})`;
+        ctx.lineWidth   = thickness;
+        ctx.lineCap     = 'round';
+        ctx.stroke();
+
+        // Halo lumineux
+        ctx.beginPath();
+        ctx.moveTo(pa.px, pa.py);
+        ctx.lineTo(pb.px, pb.py);
+        ctx.strokeStyle = `rgba(255, 200, 0, ${alpha * 0.25})`;
+        ctx.lineWidth   = thickness * 3;
+        ctx.stroke();
     }
 
     // ── Marqueurs de coins ──
-    for (let i = 0; i < boundaryPoints.length; i++) {
-        // Ne pas dupliquer le dernier point (identique au premier)
-        if (i === boundaryPoints.length - 1) break;
+    for (let i = 0; i < pts.length - 1; i++) {
+        const p = pts[i];
+        if (!p) continue;
 
-        const lp      = toLocal(boundaryPoints[i]);
-        const isFirst = i === 0;
+        const r     = Math.max(4, Math.min(14, 80 / p.dist));
+        const alpha = Math.max(0.4, Math.min(1, 1 - p.dist / 400));
 
-        const cyl = document.createElement('a-cylinder');
-        cyl.setAttribute('position', `${lp.x} ${isFirst ? 4 : 1.5} ${lp.z}`);
-        cyl.setAttribute('color',    isFirst ? '#ff2222' : '#ff44aa');
-        cyl.setAttribute('height',   isFirst ? '8' : '3');
-        cyl.setAttribute('radius',   isFirst ? '0.5' : '0.2');
-        cyl.setAttribute('opacity',  '0.95');
-        calibRig.appendChild(cyl);
+        // Cercle
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, r, 0, Math.PI * 2);
+        ctx.fillStyle   = i === 0 ? `rgba(255, 60, 60, ${alpha})` : `rgba(255, 100, 180, ${alpha})`;
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 1;
+        ctx.stroke();
 
-        // Numéro de borne
-        const lbl = document.createElement('a-text');
-        lbl.setAttribute('value',    String(i + 1));
-        lbl.setAttribute('color',    '#ffffff');
-        lbl.setAttribute('align',    'center');
-        lbl.setAttribute('scale',    '6 6 6');
-        lbl.setAttribute('position', `${lp.x} ${isFirst ? 9.5 : 5} ${lp.z}`);
-        lbl.setAttribute('look-at',  '#main-camera');
-        calibRig.appendChild(lbl);
+        // Numéro
+        if (p.dist < 300) {
+            const fs = Math.max(10, Math.min(18, 100 / p.dist));
+            ctx.font         = `bold ${fs}px Courier New`;
+            ctx.fillStyle    = '#fff';
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(i + 1), p.px, p.py - r - fs * 0.7);
+        }
+
+        // Distance en mètres
+        if (p.dist < 500) {
+            const fs2 = Math.max(9, Math.min(13, 80 / p.dist));
+            ctx.font         = `${fs2}px Courier New`;
+            ctx.fillStyle    = `rgba(0, 255, 200, ${alpha})`;
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${Math.round(p.dist)}m`, p.px, p.py + r + fs2 * 0.8);
+        }
     }
 
-    applyCalib();
+    // ── Indicateur de cap (mini boussole) ──
+    drawCompass(ctx, W - 44, 70, 28);
+
+    // ── Mise à jour HUD ──
+    updateHud();
+
+    animId = requestAnimationFrame(draw);
 }
 
-// ─────────────────────────────────────────────
+// Petite boussole visuelle en haut à droite
+function drawCompass(ctx, cx, cy, r) {
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Fond
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.fill();
+    ctx.strokeStyle = '#00ffcc44';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Flèche Nord (rouge) orientée selon le cap
+    ctx.rotate(-(heading + calib.rot) * DEG2RAD);
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.7);
+    ctx.lineTo(r * 0.22, r * 0.3);
+    ctx.lineTo(-r * 0.22, r * 0.3);
+    ctx.closePath();
+    ctx.fillStyle = '#ff4444';
+    ctx.fill();
+
+    // Flèche Sud (blanc)
+    ctx.beginPath();
+    ctx.moveTo(0, r * 0.7);
+    ctx.lineTo(r * 0.22, -r * 0.3);
+    ctx.lineTo(-r * 0.22, -r * 0.3);
+    ctx.closePath();
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+
+    ctx.restore();
+
+    // Label N fixe
+    ctx.font         = 'bold 9px Courier New';
+    ctx.fillStyle    = '#fff';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', cx, cy - r - 8);
+}
+
+// Interpolation basique pour les segments qui coupent le bord de l'écran
+function interpolateEdge(pa, pb, W, H) {
+    if (!pa || !pb) return null;
+    return { px: (pa.px + pb.px) / 2, py: (pa.py + pb.py) / 2, dist: (pa.dist + pb.dist) / 2 };
+}
+
+function updateHud() {
+    const el = document.getElementById('hud-info');
+    if (myLat === null) { el.innerText = 'En attente GPS…'; return; }
+    el.innerHTML =
+        `Cap: ${Math.round((heading + calib.rot + 360) % 360)}°&nbsp;&nbsp;` +
+        `GPS ±${window._gpsAcc || '--'}m<br>` +
+        `Calib R:${calib.rot.toFixed(0)}° X:${calib.x.toFixed(0)}m Y:${calib.y.toFixed(0)}m`;
+}
+
+// ═══════════════════════════════════════════════════════
 //  CALIBRATION
-// ─────────────────────────────────────────────
-function applyCalib() {
-    if (!calibRig) return;
-    calibRig.setAttribute('position', { x: offsetState.x, y: 0, z: offsetState.z });
-    calibRig.setAttribute('rotation', { x: 0, y: offsetState.rot, z: 0 });
-    updateDisplay();
+// ═══════════════════════════════════════════════════════
+function adj(axis, val) {
+    if (axis === 'rot') calib.rot += val;
+    if (axis === 'x')   calib.x   += val;
+    if (axis === 'y')   calib.y   += val;
+    saveCalibLocal();
 }
-
-function adjust(axis, val) {
-    if (axis === 'x')   offsetState.x   += val;
-    if (axis === 'z')   offsetState.z   += val;
-    if (axis === 'rot') offsetState.rot += val;
-    applyCalib();
+function resetCalib() {
+    calib = { rot: 0, x: 0, y: 0 };
+    saveCalibLocal();
 }
-function resetLive() {
-    offsetState = { x: 0, z: 0, rot: 0 };
-    applyCalib();
+function saveCalib() {
+    localStorage.setItem('arBoundaryCalib_v4', JSON.stringify(calib));
+    const el = document.getElementById('hud-info');
+    const prev = el.innerHTML;
+    el.style.color = '#00ff88';
+    el.innerText   = '✓ Sauvegardé';
+    setTimeout(() => { el.style.color = '#00ffcc'; }, 1800);
+}
+function saveCalibLocal() {
+    // Sauvegarde silencieuse en cours de session
+    sessionStorage.setItem('arBoundaryCalib_session', JSON.stringify(calib));
+}
+function clearCalib() {
+    if (!confirm('Réinitialiser la calibration?')) return;
+    localStorage.removeItem('arBoundaryCalib_v4');
+    calib = { rot: 0, x: 0, y: 0 };
+}
+function loadCalib() {
+    try {
+        const s = localStorage.getItem('arBoundaryCalib_v4');
+        if (s) calib = JSON.parse(s);
+    } catch(e) {}
 }
 function setStep(val, btn) {
-    stepSize = val;
-    document.querySelectorAll('.step-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-}
-function updateDisplay() {
-    document.getElementById('coord-display').innerText =
-        `X:${offsetState.x.toFixed(1)} Z:${offsetState.z.toFixed(1)} R:${offsetState.rot.toFixed(1)}°`;
+    step = val;
+    document.querySelectorAll('.sb').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
 }
 
-// ─────────────────────────────────────────────
-//  COMPASS
-// ─────────────────────────────────────────────
-async function requestCompass() {
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-        try {
-            const res = await DeviceOrientationEvent.requestPermission();
-            if (res === 'granted') {
-                setStatus('cmp', 'ok', '✓ Boussole accordée');
-                compassReady = true;
-            } else {
-                setStatus('cmp', 'err', '✗ Boussole refusée');
-            }
-        } catch(e) {
-            setStatus('cmp', 'err', '✗ Erreur boussole');
-        }
-    } else {
-        setStatus('cmp', 'ok', '✓ Boussole disponible');
-        compassReady = true;
+// ═══════════════════════════════════════════════════════
+//  GPS
+// ═══════════════════════════════════════════════════════
+function initGps() {
+    if (!navigator.geolocation) {
+        setSt('gps','err','✗ GPS non disponible'); return;
     }
-    checkAllReady();
+    navigator.geolocation.watchPosition(pos => {
+        myLat = pos.coords.latitude;
+        myLon = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy);
+        window._gpsAcc = acc;
+
+        const pct = Math.max(0, Math.min(100, (1 - acc/30) * 100));
+        const bar = document.getElementById('acc-bar');
+        bar.style.width      = pct + '%';
+        bar.style.background = acc < 5 ? '#00ffcc' : acc < 20 ? '#ffaa00' : '#ff4444';
+
+        if (!gpsReady) {
+            if (acc <= 25) {
+                setSt('gps','ok',`✓ GPS prêt (±${acc}m)`);
+                gpsReady = true; checkReady();
+            } else {
+                setSt('gps','wait',`GPS en cours… ±${acc}m`);
+            }
+        }
+
+        // Mise à jour barre de statut
+        const sb = document.getElementById('status-bar');
+        if (sb.style.display !== 'none') {
+            sb.innerText = `Pos: ${myLat.toFixed(6)}, ${myLon.toFixed(6)}  ±${acc}m  Cap: ${Math.round(heading)}°`;
+        }
+    }, err => {
+        setSt('gps','err','✗ GPS — activez la localisation');
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
 
-// ─────────────────────────────────────────────
-//  CAMERA
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+//  BOUSSOLE
+// ═══════════════════════════════════════════════════════
+function initCompass() {
+    // Essai avec 'deviceorientationabsolute' d'abord (Android Chrome)
+    // puis fallback sur 'deviceorientation' (iOS)
+    let eventName = 'deviceorientationabsolute';
+
+    const handler = (e) => {
+        let h = null;
+
+        if (e.absolute && e.alpha !== null) {
+            // Orientation absolue (Android Chrome)
+            h = (360 - e.alpha) % 360;
+        } else if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+            // iOS
+            h = e.webkitCompassHeading;
+        } else if (e.alpha !== null) {
+            // Fallback orientation relative
+            h = (360 - e.alpha) % 360;
+        }
+
+        if (h === null) return;
+
+        // Lissage exponentiel pour éviter le jitter
+        const diff = ((h - headingRaw + 540) % 360) - 180;
+        headingRaw = (headingRaw + diff * 0.15 + 360) % 360;
+        heading    = headingRaw;
+
+        if (!cmpReady) {
+            setSt('cmp','ok','✓ Boussole active');
+            cmpReady = true; checkReady();
+        }
+    };
+
+    window.addEventListener('deviceorientationabsolute', handler, true);
+    window.addEventListener('deviceorientation', handler, true);
+
+    // Timeout : si pas de boussole après 3s, on continue quand même
+    setTimeout(() => {
+        if (!cmpReady) {
+            setSt('cmp','err','⚠ Boussole absente — rotation manuelle');
+            cmpReady = true; checkReady();
+        }
+    }, 3000);
+}
+
+// ═══════════════════════════════════════════════════════
+//  CAMÉRA
+// ═══════════════════════════════════════════════════════
 function initCamera() {
-    const video = document.getElementById('ar-video-source');
+    const vid = document.getElementById('cam');
     navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width:{ideal:1280}, height:{ideal:720} },
+        video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} },
         audio: false
-    })
-    .then(stream => {
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-            video.play();
-            setStatus('cam', 'ok', '✓ Caméra prête');
-            cameraReady = true;
-            checkAllReady();
+    }).then(stream => {
+        vid.srcObject = stream;
+        vid.onloadedmetadata = () => {
+            vid.play();
+            setSt('cam','ok','✓ Caméra prête');
+            camReady = true; checkReady();
         };
-    })
-    .catch(err => {
-        setStatus('cam', 'err', '✗ Caméra refusée');
+    }).catch(err => {
+        setSt('cam','err','✗ Caméra refusée');
         console.error(err);
     });
 }
 
-// ─────────────────────────────────────────────
-//  GPS
-// ─────────────────────────────────────────────
-function initGps() {
-    if (!navigator.geolocation) {
-        setStatus('gps', 'err', '✗ GPS non disponible'); return;
-    }
-    navigator.geolocation.watchPosition(pos => {
-        const acc = Math.round(pos.coords.accuracy);
-        document.getElementById('gps-badge').innerText = `GPS ±${acc} m`;
-        const pct = Math.max(0, Math.min(100, (1 - acc / 30) * 100));
-        const bar = document.getElementById('acc-bar');
-        bar.style.width      = pct + '%';
-        bar.style.background = acc < 5 ? '#00ffcc' : acc < 20 ? '#ffaa00' : '#ff4444';
-        if (!gpsReady) {
-            if (acc <= 20) {
-                setStatus('gps', 'ok', `✓ GPS prêt (±${acc} m)`);
-                gpsReady = true; checkAllReady();
-            } else {
-                setStatus('gps', 'wait', `GPS en cours… ±${acc} m`);
-            }
-        }
-    }, err => {
-        setStatus('gps', 'err', '✗ GPS — activez la localisation');
-    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-}
-
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 //  HELPERS
-// ─────────────────────────────────────────────
-function setStatus(key, state, text) {
-    const icon  = document.getElementById(`${key}-icon`);
-    const label = document.getElementById(`${key}-label`);
-    icon.className = `s-icon s-${state}`;
-    icon.innerText = state === 'ok' ? '✓' : state === 'err' ? '✗' : '◌';
-    label.innerText = text;
+// ═══════════════════════════════════════════════════════
+function setSt(key, state, text) {
+    const ic = document.getElementById(`i-${key}`);
+    const lb = document.getElementById(`l-${key}`);
+    ic.className = `ic ${state}`;
+    ic.innerText = state==='ok' ? '✓' : state==='err' ? '✗' : '◌';
+    lb.innerText = text;
 }
-function checkAllReady() {
-    if (cameraReady && gpsReady && compassReady)
-        document.getElementById('start-btn').disabled = false;
+function checkReady() {
+    if (camReady && gpsReady && cmpReady)
+        document.getElementById('btn-start').disabled = false;
 }
 
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 //  START
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 async function startAR() {
-    if (arStarted) return;
-    await requestCompass();
-    if (!compassReady) return;
+    // Permission boussole iOS
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+            const res = await DeviceOrientationEvent.requestPermission();
+            if (res !== 'granted') {
+                alert('Permission boussole refusée. La rotation manuelle sera nécessaire.');
+            }
+        } catch(e) {}
+    }
 
-    arStarted = true;
-    loadSettings();
-    buildBoundary();
+    loadCalib();
+    document.getElementById('screen-load').style.display = 'none';
+    document.getElementById('hud-top').style.display     = 'flex';
+    document.getElementById('controls').style.display    = 'flex';
+    document.getElementById('status-bar').style.display  = 'block';
 
-    document.getElementById('initial-screen').style.display = 'none';
-    document.getElementById('top-menu').style.display = 'flex';
-    document.getElementById('ui-layer').style.display  = 'flex';
-    document.getElementById('gps-badge').style.display = 'block';
-    updateDisplay();
+    running = true;
+    draw();
 }
 
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 //  BOOT
-// ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 window.addEventListener('load', () => {
     initCamera();
     initGps();
-    // Android : pas besoin de permission boussole
-    if (typeof DeviceOrientationEvent === 'undefined' ||
-        typeof DeviceOrientationEvent.requestPermission !== 'function') {
-        setStatus('cmp', 'ok', '✓ Boussole disponible');
-        compassReady = true;
-        checkAllReady();
-    }
+    initCompass();
+});
+window.addEventListener('resize', () => {
+    const c = document.getElementById('overlay');
+    c.width  = window.innerWidth;
+    c.height = window.innerHeight;
 });
 </script>
 </body>

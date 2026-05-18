@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Boundary v6</title>
+    <title>AR Boundary v6.1</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
@@ -209,7 +209,29 @@ let step  = 1;
 let calib = { rot: 0, n: 0, e: 0 };
 let camReady = false, gpsReady = false, cmpReady = false;
 
-// ── Lissage heading (moyenne circulaire) ──────
+// Calcule le cap corrigé (heading) en tenant compte de l'inclinaison
+// du téléphone pour éviter le gimbal lock.
+// Entrée : alpha, beta, gamma de deviceorientation (degrés)
+// Sortie : heading en degrés (0=Nord, 90=Est)
+function correctedHeading(alpha, beta, gamma) {
+    if (beta === null || gamma === null) return (360 - alpha) % 360;
+
+    const a = alpha * DEG2RAD;
+    const b = beta  * DEG2RAD;
+    const g = (gamma ?? 0) * DEG2RAD;
+
+    // Reconstruit le vecteur "haut de l'écran" dans le repère monde
+    // en appliquant les rotations Euler ZXY (convention W3C deviceorientation)
+    // puis extrait l'angle dans le plan horizontal.
+    const x = -Math.cos(a)*Math.sin(b)*Math.sin(g) - Math.sin(a)*Math.cos(g);
+    const y = -Math.sin(a)*Math.sin(b)*Math.sin(g) + Math.cos(a)*Math.cos(g);
+
+    // atan2 donne l'angle dans le plan horizontal
+    const heading = (Math.atan2(x, y) / DEG2RAD + 360) % 360;
+    return heading;
+}
+
+
 const SMOOTH_N = 20;
 const sinH = new Float64Array(SMOOTH_N);
 const cosH = new Float64Array(SMOOTH_N);
@@ -239,11 +261,31 @@ function pushHeading(h) {
 // ── Lissage pitch (simple EMA) ────────────────
 let pitchSmooth = 45;
 function pushPitch(p) {
-    // beta : 0=horizontal, positif = penché vers toi (bas)
-    // On clamp entre 10° et 85°
-    const clamped = Math.max(10, Math.min(85, p));
-    pitchSmooth = pitchSmooth * 0.85 + clamped * 0.15;
+    const clamped = Math.max(5, Math.min(88, p));
+    pitchSmooth = pitchSmooth * 0.80 + clamped * 0.20;
     pitch = pitchSmooth;
+}
+
+// Calcule le pitch réel en degrés (0=horizontal, 90=pointé au sol)
+// à partir de beta et gamma de deviceorientation.
+//
+// Convention Android (portrait, caméra arrière en haut) :
+//   beta  : rotation autour X [-180, 180]  — inclinaison avant/arrière
+//   gamma : rotation autour Y [-90, 90]    — inclinaison gauche/droite
+//
+// On reconstruit le vecteur gravité dans le repère téléphone
+// et on en tire l'angle par rapport au plan horizontal.
+function calcPitch(beta, gamma) {
+    const b = beta  * DEG2RAD;
+    const g = (gamma ?? 0) * DEG2RAD;
+    // Composante verticale du vecteur gravité dans le repère téléphone
+    // gZ = -sin(beta)*cos(gamma)  (vers l'écran quand horizontal)
+    // gY =  cos(beta)             (vers le haut de l'écran)
+    // On veut l'angle que fait le téléphone avec l'horizontal :
+    // pitch = 90 - angle entre vecteur "haut écran" et vertical
+    // Formule simplifiée : angle d'inclinaison vers le sol
+    const grav_down = Math.sin(Math.abs(b)) * Math.cos(g);
+    return Math.asin(Math.min(1, Math.max(-1, grav_down))) / DEG2RAD;
 }
 
 // ═══════════════════════════════════════════════
@@ -297,24 +339,24 @@ function project(lat, lon, W, H) {
     if (Math.abs(hAngle) > H_FOV * 0.75) return null; // hors champ
 
     // ── Vertical ──
-    // Angle d'élévation du point au sol vu depuis la caméra
-    // (positif = au-dessus de l'horizontal, négatif = en dessous)
-    const elevRad = Math.atan2(CAM_HEIGHT, dist); // toujours positif (sol sous nous)
-    const elevDeg = elevRad / DEG2RAD;            // ex: dist=20m → ~4.3°, dist=5m → ~17°
+    // elevDeg = angle vers le bas depuis l'horizontal pour voir le point au sol
+    // ex: dist=20m, hauteur=1.5m → atan(1.5/20) = 4.3° sous l'horizontal
+    const elevDeg = Math.atan2(CAM_HEIGHT, Math.max(dist, 0.1)) / DEG2RAD;
 
-    // Le centre de l'image regarde à -pitch (vers le bas)
-    // donc un point à elevDeg sous l'horizontal apparaît à :
-    // vAngle = -elevDeg - (-pitch) = pitch - elevDeg
-    // si vAngle > 0 → point est au-dessus du centre → haut de l'écran
-    // si vAngle < 0 → point est sous le centre      → bas de l'écran
-    const vAngle = pitch - elevDeg;
+    // Le centre de la caméra regarde vers le bas à l'angle "pitch"
+    // (pitch=45 → caméra regarde 45° sous l'horizontal)
+    // Un point à elevDeg sous l'horizontal est dans le champ si elevDeg < pitch+V_FOV/2
+    // Sa position verticale dans l'image :
+    //   vOffset = pitch - elevDeg
+    //   vOffset > 0 → point est AU-DESSUS du centre de l'image (haut écran)
+    //   vOffset < 0 → point est EN-DESSOUS du centre (bas écran)
+    const vOffset = pitch - elevDeg;
 
-    // Pixel Y : centre = H/2, +V_FOV/2 = bas, -V_FOV/2 = haut
-    // On inverse car Y croît vers le bas
+    // py : H/2 = centre, vOffset>0 = vers le haut donc py diminue
     const px = W/2 + (hAngle / (H_FOV/2)) * (W/2);
-    const py = H/2 - (vAngle / (V_FOV/2)) * (H/2);
+    const py = H/2 - (vOffset / (V_FOV/2)) * (H/2);
 
-    return { px, py, dist, hAngle, vAngle };
+    return { px, py, dist, hAngle, vOffset };
 }
 
 // ═══════════════════════════════════════════════
@@ -549,13 +591,16 @@ function initSensors() {
     window.addEventListener('deviceorientationabsolute', e => {
         if (e.alpha === null) return;
         gotAbsolute = true;
-        pushHeading((360 - e.alpha) % 360);
+        // Correction gimbal lock : recalculer le heading depuis les 3 axes
+        // quand le téléphone est incliné (beta > 45°)
+        const h = correctedHeading(e.alpha, e.beta, e.gamma);
+        pushHeading(h);
         // beta : inclinaison avant/arrière
         // Sur Android tenu à la verticale beta≈90, incliné vers sol beta diminue
         // On veut pitch = angle entre téléphone et horizontal
         // beta=90 → horizontal, beta=0 → vertical face
         // Notre convention : 0°=horizontal, 90°=pointé au sol
-        if (e.beta !== null) pushPitch(90 - Math.abs(e.beta));
+        if (e.beta !== null) pushPitch(calcPitch(e.beta, e.gamma));
         if (!cmpReady) {
             setSt('cmp','ok','✓ Boussole + pitch (Android)');
             cmpReady = true; checkReady();
@@ -563,13 +608,14 @@ function initSensors() {
     }, true);
 
     window.addEventListener('deviceorientation', e => {
-        if (gotAbsolute) return; // déjà géré par absolute
+        if (gotAbsolute) return;
         if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+            // iOS : webkitCompassHeading est déjà corrigé pour l'inclinaison
             pushHeading(e.webkitCompassHeading);
         } else if (e.alpha !== null) {
-            pushHeading((360 - e.alpha) % 360);
+            pushHeading(correctedHeading(e.alpha, e.beta, e.gamma));
         }
-        if (e.beta !== null) pushPitch(90 - Math.abs(e.beta));
+        if (e.beta !== null) pushPitch(calcPitch(e.beta, e.gamma));
         if (!cmpReady) {
             setSt('cmp','ok','✓ Boussole + pitch actifs');
             cmpReady = true; checkReady();
